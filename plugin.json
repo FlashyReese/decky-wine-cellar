@@ -1,10 +1,10 @@
 {
-  "name": "Example Plugin",
-  "author": "John Doe",
+  "name": "Wine Cellar",
+  "author": "FlashyReese",
   "flags": ["debug", "_root"],
   "publish": {
     "tags": ["template", "root"],
-    "description": "Decky example plugin.",
+    "description": "A decky plugin to manage Steam Play compatibility tools",
     "image": "https://opengraph.githubassets.com/1/SteamDeckHomebrew/PluginLoader"
   }
 }
