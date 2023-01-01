@@ -3,7 +3,7 @@ import {FaEllipsisH} from 'react-icons/fa';
 import {useEffect, useState} from 'react';
 
 import {GitHubRelease, InstalledTool} from "../../types";
-import {getInstalledCompatibilityTools} from "../../python_hook";
+import {getInstalledCompatibilityTools, getReleaseInstallationProgress, installAndExtract} from "../../python_hook";
 
 export async function getGitHubReleases({getUrl}: { getUrl: string; }): Promise<GitHubRelease[]> {
     return fetch(getUrl, {
@@ -12,46 +12,43 @@ export async function getGitHubReleases({getUrl}: { getUrl: string; }): Promise<
 }
 
 export default function GitHubReleasesList({
-    getUrl
+                                               getUrl
                                            }: {
     getUrl: string;
 }) {
-    const [state, setState] = useState<string>("Loading...");
-
-    //serverApi.callPluginMethod("get_installed_compatibility_tools", {}).then(r => console.log(r));
-
-    const [installedTools, setInstalledTools] = useState<InstalledTool[] | null>(null);
+    //onst [installedTools, setInstalledTools] = useState<InstalledTool[]>([]);
     const [availableReleases, setAvailableReleases] = useState<GitHubRelease[] | null>(null);
 
     const [installedCompatibilityTools, setInstalledCompatibilityTools] = useState<GitHubRelease[]>([])
     const [notInstalledCompatibilityTools, setNotInstalledCompatibilityTools] = useState<GitHubRelease[]>([])
+    const [progressMap, setProgressMap] = useState(new Map);
 
     useEffect(() => {
         (async () => {
             const installedTools = await getInstalledCompatibilityTools();
-            if (installedTools.success) {
-                console.log(installedTools);
-                console.log(installedTools.result);
-                setInstalledTools(installedTools.result);
-            } else {
-                console.error("Failed to retrieve installed tools!");
-                setState("Failed to retrieve installed tools!");
-            }
+            // setInstalledTools(installedTools);
 
             const availableReleases = await getGitHubReleases({getUrl});
             setAvailableReleases(availableReleases);
 
             if (availableReleases != null) {
                 const installedCompatibilityTools = availableReleases.filter((release) =>
-                    installedTools.result.map((install: InstalledTool) => install.name).includes(release.tag_name)
+                    installedTools.map((install: InstalledTool) => install.name).includes(release.tag_name)
                 );
                 const notInstalledCompatibilityTools = availableReleases.filter((release) =>
-                    !installedTools.result.map((install: InstalledTool) => install.name).includes(release.tag_name)
+                    !installedTools.map((install: InstalledTool) => install.name).includes(release.tag_name)
                 );
-                console.log(installedCompatibilityTools);
-                // You can use the setState function or other logic to update the component state here
                 setInstalledCompatibilityTools(installedCompatibilityTools);
                 setNotInstalledCompatibilityTools(notInstalledCompatibilityTools);
+
+                const pendingInstall = installedCompatibilityTools.filter((release: GitHubRelease) => installedTools.find((install) => install.name == release.tag_name)?.status == "in_progress");
+                const freshMap = new Map();
+                pendingInstall.map(async (release: GitHubRelease) => {
+                    const result = await getReleaseInstallationProgress(release);
+                    console.log(release.id + ": " + result)
+                    freshMap.set(release.id, result.result);
+                })
+                setProgressMap(freshMap);
             }
         })();
     }, [])
@@ -60,7 +57,7 @@ export default function GitHubReleasesList({
     if (!availableReleases) {
         return (
             <div>
-                <p>{state}</p>
+                <p>Loading...</p>
             </div>
         );
     }
@@ -71,7 +68,7 @@ export default function GitHubReleasesList({
                 return (
                     <li style={{display: 'flex', flexDirection: 'row', alignItems: 'center', paddingBottom: '10px'}}>
               <span>
-                  {release.tag_name} ({installedTools?.find((install) => install.name == release.tag_name)?.status == "installed" ? "Installed" : "Installing"})
+                  {release.tag_name} ({progressMap.has(release.id) ? "Installing... " + progressMap.get(release.id) + "%" : "Installed"})
               </span>
                         <Focusable
                             style={{marginLeft: 'auto', boxShadow: 'none', display: 'flex', justifyContent: 'right'}}>
@@ -80,7 +77,8 @@ export default function GitHubReleasesList({
                                 onClick={(e: MouseEvent) =>
                                     showContextMenu(
                                         <Menu label="Runner Actions">
-                                            <MenuItem onSelected={() => {
+                                            <MenuItem onClick={() => {
+                                                console.log("Requesting to uninstall: " + release.tag_name)
                                             }}>Uninstall</MenuItem>
                                         </Menu>,
                                         e.currentTarget ?? window,
@@ -94,29 +92,38 @@ export default function GitHubReleasesList({
                 );
             })}
             {notInstalledCompatibilityTools.map((release) => {
-          return (
-            <li style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', paddingBottom: '10px' }}>
+                return (
+                    <li style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', paddingBottom: '10px' }}>
               <span>
                   {release.tag_name}
               </span>
-              <Focusable style={{ marginLeft: 'auto', boxShadow: 'none', display: 'flex', justifyContent: 'right' }}>
-                <DialogButton
-                  style={{ height: '40px', width: '40px', padding: '10px 12px', minWidth: '40px' }}
-                  onClick={(e: MouseEvent) =>
-                    showContextMenu(
-                      <Menu label="Runner Actions">
-                        <MenuItem onSelected={() => {}}> Install </MenuItem>
-                      </Menu>,
-                      e.currentTarget ?? window,
-                    )
-                  }
-                >
-                  <FaEllipsisH />
-                </DialogButton>
-              </Focusable>
-            </li>
-          );
-        })}
+                        <Focusable style={{ marginLeft: 'auto', boxShadow: 'none', display: 'flex', justifyContent: 'right' }}>
+                            <DialogButton
+                                style={{ height: '40px', width: '40px', padding: '10px 12px', minWidth: '40px' }}
+                                onClick={(e: MouseEvent) =>
+                                    showContextMenu(
+                                        <Menu label="Runner Actions">
+                                            <MenuItem onSelected={() => {}} onClick={() => {
+                                                console.log("Requesting to install: " + release.tag_name);
+                                                (async () => {
+                                                    const install = await installAndExtract(release);
+                                                    if (install.success) {
+                                                        console.log(install.result);
+                                                    }
+                                                    console.log(install);
+                                                })();
+                                            }}> Install </MenuItem>
+                                        </Menu>,
+                                        e.currentTarget ?? window,
+                                    )
+                                }
+                            >
+                                <FaEllipsisH />
+                            </DialogButton>
+                        </Focusable>
+                    </li>
+                );
+            })}
         </ul>
     );
 }
