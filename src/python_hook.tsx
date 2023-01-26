@@ -22,6 +22,10 @@ export async function installAndExtract(
     return server!.callPluginMethod("install_and_extract", {"release": release})
 }
 
+export async function addToQueue(release: GitHubRelease): Promise<any> {
+    return server!.callPluginMethod("add_to_queue", {"release": release})
+}
+
 export async function getReleaseInstallationProgress(
     release: GitHubRelease
 ): Promise<any> {

@@ -3,7 +3,11 @@ import {FaEllipsisH} from 'react-icons/fa';
 import {useEffect, useState} from 'react';
 
 import {GitHubRelease, InstalledTool} from "../../types";
-import {getInstalledCompatibilityTools, getReleaseInstallationProgress, installAndExtract} from "../../python_hook";
+import {
+    addToQueue,
+    getInstalledCompatibilityTools,
+    getReleaseInstallationProgress
+} from "../../python_hook";
 
 export async function getGitHubReleases({getUrl}: { getUrl: string; }): Promise<GitHubRelease[]> {
     return fetch(getUrl, {
@@ -106,7 +110,7 @@ export default function GitHubReleasesList({
                                             <MenuItem onSelected={() => {}} onClick={() => {
                                                 console.log("Requesting to install: " + release.tag_name);
                                                 (async () => {
-                                                    const install = await installAndExtract(release);
+                                                    const install = await addToQueue(release);
                                                     if (install.success) {
                                                         console.log(install.result);
                                                     }
