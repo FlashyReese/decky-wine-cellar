@@ -22,4 +22,5 @@ export type InstalledTool = {
   version: string;
   name: string;
   status: string;
+  progress: number;
 };

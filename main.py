@@ -1,8 +1,26 @@
+def get_plugin_dir():
+    from pathlib import Path
+
+    return Path(__file__).parent.resolve()
+
+
+def add_plugin_to_path():
+    import sys
+
+    plugin_dir = get_plugin_dir()
+    directories = [["./"], ["python"], ["python", "externals"]]
+    for dir in directories:
+        sys.path.append(str(plugin_dir.joinpath(*dir)))
+
+
+add_plugin_to_path()
+
 import logging
 import os
 import io
 import aiohttp
 import tarfile
+from python.externals import vdf
 
 logging.basicConfig(filename="/tmp/decky-wine-cellar.log",
                     format='[Wine Cellar] %(asctime)s %(levelname)s %(message)s',
@@ -11,8 +29,8 @@ logging.basicConfig(filename="/tmp/decky-wine-cellar.log",
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)  # can be changed to logging.DEBUG for debugging issues
 
+# todo: use envars for home path
 compatibility_tools_path = "/home/deck/.steam/root/compatibilitytools.d"
-
 
 class Plugin:
     in_progress_installs = []
@@ -26,9 +44,27 @@ class Plugin:
         logger.info("Goodbye World!")
         pass
 
+    def _get_compat_tools():
+        entries = os.listdir(compatibility_tools_path)
+        result = []
+        for entry in entries:
+            compat_tool_vdf_path = compatibility_tools_path + '/' + entry + '/compatibilitytool.vdf'
+            version_path = compatibility_tools_path + '/' + entry + '/version'
+            if os.path.exists(compat_tool_vdf_path):
+                d = vdf.load(open(compat_tool_vdf_path))
+                internal_name = list(d['compatibilitytools']['compat_tools'].keys())[0]
+                version = open(version_path).read().split(" ")[0].strip() if os.path.exists(version_path) else None
+                result.append({
+                    "internal": internal_name,
+                    "display": d['compatibilitytools']['compat_tools'][internal_name]['display_name'],
+                    "version": version
+                })
+        return result
+
     # These methods below were pulled from DeckyProtonManager, todo: This doesn't detect Steam Tinker Launch
     def _get_version_from_name(name, status):
         path = compatibility_tools_path + "/" + name + "/version"
+
         version_string = None
 
         with open(path) as version:

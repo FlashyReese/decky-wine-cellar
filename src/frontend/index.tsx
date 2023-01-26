@@ -11,16 +11,6 @@ export default function ManagePage() {
             route: '/wine-cellar/protonge',
         },
         {
-            title: 'Lutris',
-            content: <GitHubReleasesList getUrl={'https://api.github.com/repos/lutris/wine/releases'} />,
-            route: '/wine-cellar/lutris',
-        },
-        {
-            title: 'Bottles Caffe/Soda/Vaniglia',
-            content: <GitHubReleasesList getUrl={'https://api.github.com/repos/bottlesdevs/wine/releases'} />,
-            route: '/wine-cellar/bottles',
-        },
-        {
             title: 'Steam Tinker Launch',
             content: <GitHubReleasesList getUrl={'https://api.github.com/repos/sonic2kk/steamtinkerlaunch/releases'} />,
             route: '/wine-cellar/steamtinkerlaunch',
