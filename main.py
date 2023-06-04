@@ -23,8 +23,9 @@ import io
 import aiohttp
 import tarfile
 from python.externals import vdf
+import decky_plugin
 
-logging.basicConfig(filename="/tmp/decky-wine-cellar.log",
+logging.basicConfig(filename=decky_plugin.DECKY_PLUGIN_LOG,
                     format='[Wine Cellar] %(asctime)s %(levelname)s %(message)s',
                     filemode='w+',
                     force=True)
@@ -32,7 +33,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)  # can be changed to logging.DEBUG for debugging issues
 
 # todo: use envars for home path
-compatibility_tools_path = "/home/deck/.steam/root/compatibilitytools.d"
+compatibility_tools_path = decky_plugin.DECKY_USER_HOME + "/.steam/root/compatibilitytools.d"
 
 
 class Plugin:
