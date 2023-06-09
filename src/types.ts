@@ -40,5 +40,6 @@ export enum ResponseType {
     Uninstall = "Uninstall",
     RequestState = "RequestState",
     UpdateState = "UpdateState",
-    Notification = "Notification"
+    Notification = "Notification",
+    Reboot = "Reboot",
 }

@@ -88,6 +88,9 @@ async fn websocket_server() -> Result<(), ratchet_rs::Error> {
                                 wine_cellar::websocket_update_state(internal_installed.clone(), None, &mut websocket).await;
                             } else if response.r#type == ResponseType::Uninstall {
                                 wine_cellar::uninstall_compatibility_tool(&path, &response.name.unwrap(), &mut internal_installed, &mut websocket).await;
+                            } else if response.r#type == ResponseType::Reboot {
+                                internal_installed = steam::get_installed_compatibility_tools(&path);
+                                wine_cellar::websocket_update_state(internal_installed.clone(), None, &mut websocket).await;
                             }
                             //websocket.write(&mut buf, PayloadType::Text).await.unwrap();
                             buf.clear();
@@ -102,12 +105,12 @@ async fn websocket_server() -> Result<(), ratchet_rs::Error> {
                         Message::Close(reason) => {
                             if let Some(reason) = reason {
                                 if let Some(reason_description) = &reason.description {
-                                    info!("Closed websocket server! Reason: {}", reason_description);
+                                    info!("Closed websocket connection! Reason: {}", reason_description);
                                 } else {
-                                    info!("Closed websocket server!");
+                                    info!("Closed websocket connection!");
                                 }
                             } else {
-                                info!("Closed websocket server!");
+                                info!("Closed websocket connection!");
                             }
                             break;
                         }
@@ -116,7 +119,7 @@ async fn websocket_server() -> Result<(), ratchet_rs::Error> {
             }
         }
         Err(error) => {
-            error!("Failed to bind to port!")
+            error!("{}", error);
         }
     }
 

@@ -1,7 +1,22 @@
-import {DialogButton, Focusable, Menu, MenuItem, ProgressBarItem, showContextMenu} from 'decky-frontend-lib';
+import {
+    DialogBody,
+    DialogButton, DialogControlsSection, DialogControlsSectionHeader,
+    Focusable,
+    Menu,
+    MenuItem,
+    ProgressBarWithInfo,
+    showContextMenu
+} from 'decky-frontend-lib';
 import {FaEllipsisH} from 'react-icons/fa';
 import {useEffect, useState} from 'react';
-import {GitHubRelease, QueueCompatibilityTool, Response, ResponseType, SteamCompatibilityTool} from "../../types";
+import {
+    GitHubRelease,
+    QueueCompatibilityTool,
+    QueueCompatibilityToolState,
+    Response,
+    ResponseType,
+    SteamCompatibilityTool
+} from "../../types";
 import {error, log} from '../../logger';
 
 export async function getGitHubReleases({getUrl}: { getUrl: string; }): Promise<GitHubRelease[]> {
@@ -15,7 +30,9 @@ export default function GitHubReleasesList({getUrl}: { getUrl: string; }) {
 
     const [installedCompatibilityTools, setInstalledCompatibilityTools] = useState<GitHubRelease[]>([])
     const [notInstalledCompatibilityTools, setNotInstalledCompatibilityTools] = useState<GitHubRelease[]>([])
+    const [installed, setInstalled] = useState<SteamCompatibilityTool[]>([])
     const [queuedTask, setQueuedTask] = useState<QueueCompatibilityTool | null>(null);
+
 
     const [socket, setSocket] = useState<WebSocket>();
 
@@ -44,6 +61,7 @@ export default function GitHubReleasesList({getUrl}: { getUrl: string; }) {
                     const notInstalledCompatibilityTools = availableReleases.filter((release) =>
                         !response.installed?.map((install: SteamCompatibilityTool) => install.name).includes(release.tag_name)
                     );
+                    setInstalled(response.installed);
                     setInstalledCompatibilityTools(installedCompatibilityTools);
                     setNotInstalledCompatibilityTools(notInstalledCompatibilityTools);
 
@@ -99,68 +117,108 @@ export default function GitHubReleasesList({getUrl}: { getUrl: string; }) {
             error("WebSocket not alive...");
         }
     };
-
     return (
-        <ul style={{listStyleType: 'none'}}>
-            {installedCompatibilityTools.map((release: GitHubRelease) => {
-                const isQueued = queuedTask !== null;
-                return (
-                    <li style={{display: 'flex', flexDirection: 'row', alignItems: 'center', paddingBottom: '10px'}}>
-                        <span>{release.tag_name} (Installed)</span>
-                        <Focusable
-                            style={{marginLeft: 'auto', boxShadow: 'none', display: 'flex', justifyContent: 'right'}}>
-                            <DialogButton
-                                style={{height: '40px', width: '40px', padding: '10px 12px', minWidth: '40px'}}
-                                onClick={(e: MouseEvent) =>
-                                    showContextMenu(
-                                        <Menu label="Runner Actions">
-                                            <MenuItem disabled={isQueued} onClick={() => {
-                                                handleUninstall(release);
-                                            }}>Uninstall</MenuItem>
-                                        </Menu>,
-                                        e.currentTarget ?? window,
-                                    )
-                                }
-                            >
-                                <FaEllipsisH/>
-                            </DialogButton>
-                        </Focusable>
-                    </li>
-                );
-            })}
-            {notInstalledCompatibilityTools.map((release) => {
-                const isQueued = queuedTask !== null;
-                const isItemQueued = isQueued && queuedTask.name === release.tag_name;
-                return (
-                    <li style={{display: 'flex', flexDirection: 'row', alignItems: 'center', paddingBottom: '10px'}}>
-                        <span>{release.tag_name} {isItemQueued ? "(" + queuedTask?.state + ")" : ""}</span>
-                        {isItemQueued && (
-                            <div style={{marginLeft: 'auto', paddingLeft: '10px', minWidth: '200px'}}>
-                                <ProgressBarItem nProgress={queuedTask?.progress}/>
-                            </div>
-                        )}
-                        <Focusable
-                            style={{marginLeft: 'auto', boxShadow: 'none', display: 'flex', justifyContent: 'right'}}>
-                            <DialogButton
-                                style={{height: '40px', width: '40px', padding: '10px 12px', minWidth: '40px'}}
-                                onClick={(e: MouseEvent) =>
-                                    showContextMenu(
-                                        <Menu label="Runner Actions">
-                                            <MenuItem disabled={isQueued} onSelected={() => {
-                                            }} onClick={() => {
-                                                handleInstall(release);
-                                            }}>Install</MenuItem>
-                                        </Menu>,
-                                        e.currentTarget ?? window,
-                                    )
-                                }
-                            >
-                                <FaEllipsisH/>
-                            </DialogButton>
-                        </Focusable>
-                    </li>
-                );
-            })}
-        </ul>
+        <DialogBody>
+            <DialogControlsSection>
+                <DialogControlsSectionHeader>
+                    Installed
+                </DialogControlsSectionHeader>
+                <ul style={{listStyleType: 'none'}}>
+                    {installedCompatibilityTools.map((release: GitHubRelease) => {
+                        const isQueued = queuedTask !== null;
+                        const requiresRestart = installed.filter(ct => (ct.name == release.tag_name || ct.display_name == release.tag_name || ct.internal_name == release.tag_name) && ct.requires_restart).length == 1;
+                        return (
+                            <li style={{
+                                display: 'flex',
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                paddingBottom: '10px'
+                            }}>
+                                <span>{release.tag_name} {requiresRestart && "(Requires Restart)"} </span>
+                                <Focusable
+                                    style={{
+                                        marginLeft: 'auto',
+                                        boxShadow: 'none',
+                                        display: 'flex',
+                                        justifyContent: 'right'
+                                    }}>
+                                    <DialogButton
+                                        style={{height: '40px', width: '40px', padding: '10px 12px', minWidth: '40px'}}
+                                        onClick={(e: MouseEvent) =>
+                                            showContextMenu(
+                                                <Menu label="Runner Actions">
+                                                    <MenuItem disabled={isQueued} onClick={() => {
+                                                        handleUninstall(release);
+                                                    }}>Uninstall</MenuItem>
+                                                    {requiresRestart && (
+                                                        <MenuItem disabled={isQueued} onClick={() => {
+                                                            SteamClient.User.StartRestart();
+                                                        }}>Restart Steam</MenuItem>
+                                                    )}
+                                                </Menu>,
+                                                e.currentTarget ?? window,
+                                            )
+                                        }
+                                    >
+                                        <FaEllipsisH/>
+                                    </DialogButton>
+                                </Focusable>
+                            </li>
+                        );
+                    })}
+                </ul>
+            </DialogControlsSection>
+            <DialogControlsSection>
+                <DialogControlsSectionHeader>
+                    Not Installed
+                </DialogControlsSectionHeader>
+                <ul>
+                    {notInstalledCompatibilityTools.map((release) => {
+                        const isQueued = queuedTask !== null;
+                        const isItemQueued = isQueued && queuedTask.name === release.tag_name;
+                        return (
+                            <li style={{
+                                display: 'flex',
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                paddingBottom: '10px'
+                            }}>
+                                <span>{release.tag_name}</span>
+                                {isItemQueued && (
+                                    <div style={{marginLeft: 'auto', paddingLeft: '10px', minWidth: '200px'}}>
+                                        <ProgressBarWithInfo nProgress={queuedTask?.progress}
+                                                         indeterminate={queuedTask?.state == QueueCompatibilityToolState.Extracting} sOperationText={queuedTask?.state}/>
+                                    </div>
+                                )}
+                                <Focusable
+                                    style={{
+                                        marginLeft: 'auto',
+                                        boxShadow: 'none',
+                                        display: 'flex',
+                                        justifyContent: 'right'
+                                    }}>
+                                    <DialogButton
+                                        style={{height: '40px', width: '40px', padding: '10px 12px', minWidth: '40px'}}
+                                        onClick={(e: MouseEvent) =>
+                                            showContextMenu(
+                                                <Menu label="Runner Actions">
+                                                    <MenuItem disabled={isQueued} onSelected={() => {
+                                                    }} onClick={() => {
+                                                        handleInstall(release);
+                                                    }}>Install</MenuItem>
+                                                </Menu>,
+                                                e.currentTarget ?? window,
+                                            )
+                                        }
+                                    >
+                                        <FaEllipsisH/>
+                                    </DialogButton>
+                                </Focusable>
+                            </li>
+                        );
+                    })}
+                </ul>
+            </DialogControlsSection>
+        </DialogBody>
     );
 }

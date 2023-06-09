@@ -1,5 +1,5 @@
 use std::fmt::Write;
-use std::{env, fs, io};
+use std::{fs, io};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use bytes::BytesMut;
@@ -11,7 +11,7 @@ use serde_json::Value;
 use tokio::net::TcpStream;
 use crate::steam::SteamCompatibilityTool;
 use futures_util::StreamExt;
-use log::info;
+use log::{error, info};
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct Response {
@@ -29,7 +29,8 @@ pub enum ResponseType {
     Uninstall,
     RequestState,
     UpdateState,
-    Notification
+    Notification,
+    Reboot
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -60,7 +61,11 @@ pub async fn websocket_notification(message: String, websocket: &mut WebSocket<T
     let update = serde_json::to_string(&response_new).unwrap();
     info!("Websocket message sent: {}", update);
     buf_new.write_str(&update).expect("TODO: panic message");
-    websocket.write(buf_new, PayloadType::Text).await.expect("TODO: panic message");
+    if websocket.is_active() {
+        websocket.write(buf_new, PayloadType::Text).await.expect("TODO: panic message");
+    } else {
+        error!("Websocket connection isn't alive! Failed to send notification");
+    }
 }
 
 pub async fn websocket_update_state(internal_installed: Vec<SteamCompatibilityTool>, queue: Option<QueueCompatibilityTool>, websocket: &mut WebSocket<TcpStream, NoExt>) {
@@ -76,7 +81,11 @@ pub async fn websocket_update_state(internal_installed: Vec<SteamCompatibilityTo
     let update = serde_json::to_string(&response_new).unwrap();
     info!("Websocket message sent: {}", update);
     buf_new.write_str(&update).expect("TODO: panic message");
-    websocket.write(buf_new, PayloadType::Text).await.expect("TODO: panic message");
+    if websocket.is_active() {
+        websocket.write(buf_new, PayloadType::Text).await.expect("TODO: panic message");
+    } else {
+        error!("Websocket connection isn't alive! Failed to update state");
+    }
 }
 
 pub async fn install_compatibility_tool(compatibility_tools_path: &PathBuf, response: &Response, internal_installed: &mut Vec<SteamCompatibilityTool>, websocket: &mut WebSocket<TcpStream, NoExt>) {
@@ -207,10 +216,4 @@ pub async fn github_gzip_lookup(url: String) -> Option<QueueCompatibilityTool> {
         }
     }
     None
-}
-
-pub fn print_all_env() {
-    for env in env::vars() {
-        println!("{} = {}", env.0, env.1);
-    }
 }
