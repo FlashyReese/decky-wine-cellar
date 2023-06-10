@@ -1,7 +1,7 @@
 {
   "name": "Wine Cellar",
   "author": "FlashyReese",
-  "flags": ["debug", "root"],
+  "flags": ["debug", "_root"],
   "publish": {
     "tags": ["template", "root"],
     "description": "A decky plugin to manage Steam Play compatibility tools",

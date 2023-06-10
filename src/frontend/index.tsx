@@ -7,7 +7,8 @@ export default function ManagePage() {
     const pages = [
         {
             title: 'ProtonGE',
-            content: <GitHubReleasesList getUrl={'https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases'} />,
+            content: <GitHubReleasesList
+                getUrl={'https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases'}/>,
             route: '/wine-cellar/protonge',
         },
         /*{
@@ -17,5 +18,5 @@ export default function ManagePage() {
         },*/
     ];
 
-    return <SidebarNavigation title="Wine Cellar" showTitle pages={pages} />;
+    return <SidebarNavigation title="Wine Cellar" showTitle pages={pages}/>;
 }
