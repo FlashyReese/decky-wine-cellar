@@ -1,9 +1,8 @@
-mod steam;
-mod wine_cellar;
+mod steam_util;
+mod wine_cask;
 
 use std::{env, io::Error, io::Write as IoWrite};
 use std::fs::OpenOptions;
-use std::path::Path;
 use bytes::BytesMut;
 use env_logger::Env;
 
@@ -12,8 +11,7 @@ use log::{error, info, LevelFilter};
 use ratchet_rs::{Message, NoExtProvider, PayloadType, ProtocolRegistry, UpgradedServer, WebSocketConfig};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
-use crate::steam::SteamCompatibilityTool;
-use crate::wine_cellar::{Response, ResponseType};
+use crate::wine_cask::{AppState, Request, RequestType, WineCask};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -48,14 +46,15 @@ async fn main() -> Result<(), Error> {
 async fn websocket_server() -> Result<(), ratchet_rs::Error> {
     info!("Starting websocket server...");
     let listener = TcpListener::bind("127.0.0.1:8887").await; //Todo: allow port from default settings
+    let wine_cask: WineCask = WineCask::new();
+    let installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
+    let mut app_state: AppState = AppState {
+        installed_compatibility_tools,
+        in_progress: None,
+    };
     match listener {
         Ok(listener) => {
             let mut incoming = TcpListenerStream::new(listener);
-
-            let path = env::var("DECKY_USER_HOME").unwrap_or("/home/deck".parse().unwrap()); // we don't know and fall back to /home/deck
-            let path = Path::new(&path).join(".steam").join("root").join("compatibilitytools.d");
-            let mut internal_installed: Vec<SteamCompatibilityTool> = steam::get_installed_compatibility_tools(&path);//Vec::new(); // must be one time query on launch and updated.
-
             while let Some(socket) = incoming.next().await {
                 let socket = socket?;
 
@@ -81,16 +80,16 @@ async fn websocket_server() -> Result<(), ratchet_rs::Error> {
                             let bytes: &[u8] = &buf[..];
                             let msg = String::from_utf8_lossy(bytes).to_string();
                             info!("Websocket message received: {}", msg);
-                            let response: Response = serde_json::from_str(&msg).unwrap();
-                            if response.r#type == ResponseType::Install {
-                                wine_cellar::install_compatibility_tool(&path, &response, &mut internal_installed, &mut websocket).await;
-                            } else if response.r#type == ResponseType::RequestState {
-                                wine_cellar::websocket_update_state(internal_installed.clone(), None, &mut websocket).await;
-                            } else if response.r#type == ResponseType::Uninstall {
-                                wine_cellar::uninstall_compatibility_tool(&path, &response.name.unwrap(), &mut internal_installed, &mut websocket).await;
-                            } else if response.r#type == ResponseType::Reboot {
-                                internal_installed = steam::get_installed_compatibility_tools(&path);
-                                wine_cellar::websocket_update_state(internal_installed.clone(), None, &mut websocket).await;
+                            let request: Request = serde_json::from_str(&msg).unwrap();
+                            if request.r#type == RequestType::RequestState {
+                                wine_cask::websocket_update_state(app_state.clone(), &mut websocket).await;
+                            } else if request.r#type == RequestType::Install {
+                                wine_cask.install_compatibility_tool(request.install.unwrap(), &mut app_state, &mut websocket).await;
+                            } else if request.r#type == RequestType::Uninstall {
+                                wine_cask.uninstall_compatibility_tool(request.uninstall.unwrap(), &mut app_state, &mut websocket).await;
+                            } else if request.r#type == RequestType::Reboot {
+                                app_state.installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
+                                wine_cask::websocket_update_state(app_state.clone(), &mut websocket).await;
                             }
                             //websocket.write(&mut buf, PayloadType::Text).await.unwrap();
                             buf.clear();

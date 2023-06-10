@@ -4,29 +4,50 @@ export type GitHubRelease = {
     tag_name: string;
 };
 
-export type Response = {
-    type: ResponseType;
-    message?: string | null;
-    name?: string | null;
-    url?: string | null;
-    installed?: SteamCompatibilityTool[] | null;
-    in_progress?: QueueCompatibilityTool | null;
+export type AppState = {
+    installed_compatibility_tools: SteamCompatibilityTool[],
+    in_progress?: QueueCompatibilityTool | null
+}
+
+export type Request = {
+    type: RequestType;
+    app_state?: AppState | null;
+    install?: Install | null;
+    uninstall?: Uninstall | null;
 };
+
+export type Install = {
+    flavor: CompatibilityToolFlavor,
+    url: string,
+}
+
+export type Uninstall = {
+    flavor: CompatibilityToolFlavor,
+    name: string,
+}
+
 
 export type SteamCompatibilityTool = {
     name: string;
     internal_name: string;
     display_name: string;
-    version?: string | null;
-    path: string;
+    used_by_games: string[];
     requires_restart: boolean;
 }
 
 export type QueueCompatibilityTool = {
+    flavor: CompatibilityToolFlavor;
     name: string;
     url: string;
     state: QueueCompatibilityToolState;
     progress: number;
+}
+
+export enum CompatibilityToolFlavor {
+    ProtonGE = "ProtonGE",
+    SteamTinkerLaunch = "SteamTinkerLaunch",
+    Luxtorpeda = "Luxtorpeda",
+    Boxtron = "Boxtron"
 }
 
 export enum QueueCompatibilityToolState {
@@ -35,7 +56,7 @@ export enum QueueCompatibilityToolState {
     Waiting = "Waiting",
 }
 
-export enum ResponseType {
+export enum RequestType {
     Install = "Install",
     Uninstall = "Uninstall",
     RequestState = "RequestState",

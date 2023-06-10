@@ -10,7 +10,7 @@ import {VFC} from "react";
 import {FaShip} from "react-icons/fa";
 
 import ManagePage from "./frontend";
-import {Response, ResponseType} from "./types";
+import {Request, RequestType} from "./types";
 import {log} from "./logger";
 //import {setupNotifications, unmountNotifications} from "./ws/notifications";
 
@@ -46,8 +46,8 @@ export default definePlugin((serverApi: ServerAPI) => {
         // Fixme: If task is being performed at the backend this will stall and probably not run?
         const ws = new WebSocket("ws://localhost:8887");
         ws.onopen = (): void => {
-            const response: Response = {
-                type: ResponseType.Reboot,
+            const response: Request = {
+                type: RequestType.Reboot,
             };
             ws.send(JSON.stringify(response));
             ws.close();
