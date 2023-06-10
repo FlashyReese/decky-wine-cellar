@@ -1,0 +1,75 @@
+name: Build and Package
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm i
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Extract project name
+        id: extract-project-name
+        run: echo "project_name=$(jq -r '.name' plugin.json)" >> $GITHUB_OUTPUT
+
+      - name: Extract project version
+        id: extract-project-version
+        run: echo "project_version=$(jq -r '.version' package.json)" >> $GITHUB_OUTPUT
+
+      - name: Create directory
+        run: mkdir -p "${{ steps.extract-project-name.outputs.project_name }}/bin"
+
+      - name: Copy frontend files
+        run: cp -r dist "${{ steps.extract-project-name.outputs.project_name }}"
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Extract backend binary name
+        id: extract-backend-binary-name
+        run: echo "binary_name=$(awk -F ' = ' '$1 == "name" {print $2}' backend/Cargo.toml | tr -d '\"')" >> $GITHUB_OUTPUT
+
+      - name: Build backend
+        run: cargo build --release --manifest-path backend/Cargo.toml
+
+      - name: Copy backend binary
+        run: |
+          chmod +x backend/target/release/${{ steps.extract-backend-binary-name.outputs.binary_name }}
+          cp backend/target/release/${{ steps.extract-backend-binary-name.outputs.binary_name }} "${{ steps.extract-project-name.outputs.project_name }}/bin/backend"
+
+      - name: Copy additional files
+        run: |
+          cp main.py "${{ steps.extract-project-name.outputs.project_name }}"
+          cp LICENSE "${{ steps.extract-project-name.outputs.project_name }}"
+          cp README.md "${{ steps.extract-project-name.outputs.project_name }}"
+          cp package.json "${{ steps.extract-project-name.outputs.project_name }}"
+          cp plugin.json "${{ steps.extract-project-name.outputs.project_name }}"
+          mkdir build
+          cp -r "${{ steps.extract-project-name.outputs.project_name }}" build
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: "${{ steps.extract-project-name.outputs.project_name }}-${{ steps.extract-project-version.outputs.project_version }}"
+          path: "build"
