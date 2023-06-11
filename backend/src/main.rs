@@ -82,6 +82,7 @@ async fn websocket_server() -> Result<(), ratchet_rs::Error> {
                             info!("Websocket message received: {}", msg);
                             let request: Request = serde_json::from_str(&msg).unwrap();
                             if request.r#type == RequestType::RequestState {
+                                wine_cask.update_used_by_games(&mut app_state);
                                 wine_cask::websocket_update_state(app_state.clone(), &mut websocket).await;
                             } else if request.r#type == RequestType::Install {
                                 wine_cask.install_compatibility_tool(request.install.unwrap(), &mut app_state, &mut websocket).await;

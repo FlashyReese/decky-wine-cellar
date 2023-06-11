@@ -110,23 +110,34 @@ impl WineCask {
         }
     }
 
-    pub fn list_compatibility_tools(&self) -> Option<Vec<SteamCompatibilityTool>> {
-        let compat_tools = self.steam_util.list_compatibility_tools().expect("Failed to get list of compatibility tools");
+    pub fn get_used_by_games(&self, name: &str, display_name: &str, internal_name: &str) -> Vec<String> {
         let compat_tools_mapping = self.steam_util.get_compatibility_tools_mappings().expect("Failed to get compatibility tools mappings");
         let installed_games = self.steam_util.list_installed_games().expect("Failed to get list of installed games");
+        let used_by_games: Vec<String> = installed_games
+            .iter()
+            .filter(|game| compat_tools_mapping.contains_key(&game.app_id) &&
+                (compat_tools_mapping.get(&game.app_id).unwrap().eq(name)
+                    || compat_tools_mapping.get(&game.app_id).unwrap().eq(display_name)
+                    || compat_tools_mapping.get(&game.app_id).unwrap().eq(internal_name))
+            )
+            .map(|game| game.name.clone())
+            .collect();
+        return used_by_games;
+    }
+
+    pub fn update_used_by_games(&self, app_state: &mut AppState) {
+        for compat_tool in &mut app_state.installed_compatibility_tools {
+            compat_tool.used_by_games = self.get_used_by_games(&compat_tool.name, &compat_tool.display_name, &compat_tool.internal_name);
+        }
+    }
+
+    pub fn list_compatibility_tools(&self) -> Option<Vec<SteamCompatibilityTool>> {
+        let compat_tools = self.steam_util.list_compatibility_tools().expect("Failed to get list of compatibility tools");
 
         let mut compatibility_tools: Vec<SteamCompatibilityTool> = Vec::new();
 
         for compat_tool in &compat_tools {
-            let used_by_games: Vec<String> = installed_games
-                .iter()
-                .filter(|game| compat_tools_mapping.contains_key(&game.app_id) &&
-                    (compat_tools_mapping.get(&game.app_id).unwrap().eq(&compat_tool.name)
-                        || compat_tools_mapping.get(&game.app_id).unwrap().eq(&compat_tool.display_name)
-                    || compat_tools_mapping.get(&game.app_id).unwrap().eq(&compat_tool.internal_name))
-                )
-                .map(|game| game.name.clone())
-                .collect();
+            let used_by_games: Vec<String> = self.get_used_by_games(&compat_tool.name, &compat_tool.display_name, &compat_tool.internal_name);
             compatibility_tools.push(SteamCompatibilityTool {
                 name: compat_tool.name.to_string(),
                 display_name: compat_tool.display_name.to_string(),
