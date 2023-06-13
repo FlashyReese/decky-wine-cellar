@@ -48,7 +48,9 @@ async fn websocket_server() -> Result<(), ratchet_rs::Error> {
     let listener = TcpListener::bind("127.0.0.1:8887").await; //Todo: allow port from default settings
     let wine_cask: WineCask = WineCask::new();
     let installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
+    let flavors = wine_cask.get_flavors(&installed_compatibility_tools).await;
     let mut app_state: AppState = AppState {
+        available_flavors: flavors,
         installed_compatibility_tools,
         in_progress: None,
     };
@@ -90,6 +92,7 @@ async fn websocket_server() -> Result<(), ratchet_rs::Error> {
                                 wine_cask.uninstall_compatibility_tool(request.uninstall.unwrap(), &mut app_state, &mut websocket).await;
                             } else if request.r#type == RequestType::Reboot {
                                 app_state.installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
+                                app_state.available_flavors = wine_cask.get_flavors(&app_state.installed_compatibility_tools).await;
                                 wine_cask::websocket_update_state(app_state.clone(), &mut websocket).await;
                             }
                             //websocket.write(&mut buf, PayloadType::Text).await.unwrap();

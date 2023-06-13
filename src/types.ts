@@ -5,8 +5,15 @@ export type GitHubRelease = {
 };
 
 export type AppState = {
+    available_flavors: Flavor[],
     installed_compatibility_tools: SteamCompatibilityTool[],
     in_progress?: QueueCompatibilityTool | null
+}
+
+export type Flavor = {
+    flavor: CompatibilityToolFlavor,
+    installed: SteamCompatibilityTool[],
+    not_installed: GitHubRelease[],
 }
 
 export type Request = {
@@ -26,9 +33,9 @@ export type Uninstall = {
     name: string,
 }
 
-
 export type SteamCompatibilityTool = {
-    name: string;
+    //name: string;
+    directory_name: string;
     internal_name: string;
     display_name: string;
     used_by_games: string[];
