@@ -127,7 +127,7 @@ export default function FlavorTab({ getAppState, getFlavor, getSocket}: { getApp
                                         <div style={{marginLeft: 'auto', paddingLeft: '10px', minWidth: '200px'}}>
                                             <ProgressBarWithInfo nProgress={getAppState.in_progress?.progress}
                                                                  indeterminate={getAppState.in_progress?.state == QueueCompatibilityToolState.Extracting}
-                                                                 sOperationText={getAppState.in_progress?.state}/>
+                                                                 sOperationText={getAppState.in_progress?.state} bottomSeparator="none"/>
                                         </div>
                                     )}
                                     <Focusable
