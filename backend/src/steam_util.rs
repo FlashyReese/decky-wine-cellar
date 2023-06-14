@@ -22,7 +22,7 @@ pub struct SteamUtil {
     steam_path: PathBuf,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct CompatibilityTool {
     pub path: PathBuf,
     pub directory_name: String,

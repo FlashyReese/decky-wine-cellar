@@ -11,9 +11,8 @@ import {
 import {FaEllipsisH} from 'react-icons/fa';
 import {
     AppState,
-    CompatibilityToolFlavor, Flavor,
-    GitHubRelease,
-    QueueCompatibilityToolState,
+    Flavor,
+    QueueCompatibilityToolState, GitHubRelease,
     Request,
     RequestType, SteamCompatibilityTool
 } from "../types";
@@ -25,8 +24,11 @@ export default function FlavorTab({ getAppState, getFlavor, getSocket}: { getApp
             const response: Request = {
                 type: RequestType.Install,
                 install: {
-                    flavor: CompatibilityToolFlavor.ProtonGE,
-                    url: release.url,
+                    flavor: getFlavor.flavor,
+                    install: release,
+                    /*id: release.id,
+                    tag_name: release.tag_name,
+                    url: release.url,*/
                 },
             };
             getSocket.send(JSON.stringify(response));
@@ -40,8 +42,10 @@ export default function FlavorTab({ getAppState, getFlavor, getSocket}: { getApp
             const response: Request = {
                 type: RequestType.Uninstall,
                 uninstall: {
-                    flavor: CompatibilityToolFlavor.ProtonGE,
-                    name: release.internal_name, //fixme: we should pass back a directory instead
+                    flavor: getFlavor.flavor,
+                    uninstall: release,
+                    /*internal_name: release.internal_name, //fixme: we should pass back a directory instead
+                    path: release.path,*/
                 },
             };
             getSocket.send(JSON.stringify(response));
