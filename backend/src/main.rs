@@ -2,17 +2,7 @@ mod steam_util;
 mod wine_cask;
 mod github_util;
 
-use std::{env, io::Error, io::Write as IoWrite};
-use std::fs::OpenOptions;
-use bytes::BytesMut;
 use env_logger::Env;
-
-use futures_util::{StreamExt};
-use log::{error, info, LevelFilter};
-use ratchet_rs::{Message, NoExtProvider, PayloadType, ProtocolRegistry, UpgradedServer, WebSocketConfig};
-use tokio::net::TcpListener;
-use tokio_stream::wrappers::TcpListenerStream;
-use crate::wine_cask::{AppState, Request, RequestType, WineCask};
 
 /*
 fixme: potential issues,
@@ -24,8 +14,81 @@ solution: is to extract in a tmp directory generate our vdf then copy to our des
 
  */
 
+use std::{
+    io::Write as IoWrite,
+    collections::HashMap,
+    env,
+    io::Error as IoError,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
+use std::collections::VecDeque;
+use std::fs::OpenOptions;
+use std::path::PathBuf;
+use std::sync::MutexGuard;
+
+use futures_channel::mpsc::{unbounded, UnboundedSender};
+use futures_util::{future, pin_mut, stream::TryStreamExt, StreamExt};
+use log::{info, LevelFilter};
+
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::tungstenite::protocol::Message;
+use crate::steam_util::SteamUtil;
+use crate::wine_cask::{AppState, Request, RequestType, WineCask};
+
+type Tx = UnboundedSender<Message>;
+type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
+type AsyncAppState = Arc<Mutex<AppState>>;
+type ArcWineCask = Arc<WineCask>;
+
+async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stream: TcpStream, addr: SocketAddr) {
+    println!("Incoming TCP connection from: {}", addr);
+
+    let ws_stream = tokio_tungstenite::accept_async(raw_stream)
+        .await
+        .expect("Error during the websocket handshake occurred");
+    println!("WebSocket connection established: {}", addr);
+
+    // Insert the write part of this peer to the peer map.
+    let (tx, rx) = unbounded();
+    peer_map.lock().unwrap().insert(addr, tx);
+
+    let (outgoing, incoming) = ws_stream.split();
+
+    let broadcast_incoming = incoming.try_for_each(|msg| {
+        println!("Received a message from {}: {}", addr, msg.to_text().unwrap());
+
+        if let Ok(msg) = &msg.to_text() {
+            if !msg.is_empty() {
+                let request: Request = serde_json::from_str(&msg).unwrap();
+                if request.r#type == RequestType::RequestState {
+                    //wine_cask.update_used_by_games(&mut app_state);
+                    wine_cask.broadcast_app_state(&peer_map);
+                } else if request.r#type == RequestType::Install {
+                    wine_cask.add_to_queue(request.install.unwrap());
+                } else if request.r#type == RequestType::Uninstall {
+                    //tokio::spawn(wine_cask.uninstall_compatibility_tool(request.uninstall.unwrap(), &peer_map));
+                } else if request.r#type == RequestType::Reboot {
+                    wine_cask.app_state.lock().unwrap().installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
+                    wine_cask.broadcast_app_state(&peer_map);
+                }
+            }
+        }
+
+        future::ok(())
+    });
+
+    let receive_from_others = rx.map(Ok).forward(outgoing);
+
+    pin_mut!(broadcast_incoming, receive_from_others);
+    future::select(broadcast_incoming, receive_from_others).await;
+
+    println!("{} disconnected", &addr);
+    peer_map.lock().unwrap().remove(&addr);
+}
+
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), IoError> {
     // Configure the logger
     let path = env::var("DECKY_PLUGIN_LOG").unwrap_or("/tmp/decky-wine-cellar.log".parse().unwrap()); // Fixme: Probably separate logs
 
@@ -49,93 +112,49 @@ async fn main() -> Result<(), Error> {
         .target(env_logger::Target::Pipe(Box::new(target)))
         .init();
 
-    websocket_server().await.expect("TODO: panic message");
-    info!("Exiting...");
-    Ok(())
-}
+    {
+        let addr = env::args().nth(1).unwrap_or_else(|| "127.0.0.1:8887".to_string());
 
-async fn websocket_server() -> Result<(), ratchet_rs::Error> {
-    info!("Starting websocket server...");
-    let listener = TcpListener::bind("127.0.0.1:8887").await; //Todo: allow port from default settings
-    let wine_cask: WineCask = WineCask::new();
-    let installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
-    let flavors = wine_cask.get_flavors(&installed_compatibility_tools, true).await;
-    let mut app_state: AppState = AppState {
-        available_flavors: flavors,
-        installed_compatibility_tools,
-        in_progress: None,
-    };
-    match listener {
-        Ok(listener) => {
-            let mut incoming = TcpListenerStream::new(listener);
-            while let Some(socket) = incoming.next().await {
-                let socket = socket?;
+        let state = PeerMap::new(Mutex::new(HashMap::new()));
 
-                // An upgrader contains information about what the peer has requested.
-                let upgrader = ratchet_rs::accept_with(
-                    socket,
-                    WebSocketConfig::default(),
-                    NoExtProvider,
-                    ProtocolRegistry::default(),
-                ).await?;
+        let steam_util = SteamUtil::new(PathBuf::from(std::env::var("DECKY_USER_HOME").unwrap()).join(".steam"));
 
-                let UpgradedServer {
-                    request: _,
-                    mut websocket,
-                    subprotocol: _,
-                } = upgrader.upgrade().await?;
+        let app_state = AsyncAppState::new(Mutex::new(AppState {
+            available_flavors: Vec::new(),
+            installed_compatibility_tools: Vec::new(),
+            in_progress: None,
+            queue: VecDeque::new(),
+        }));
 
-
-                let mut buf = BytesMut::new();
-                loop {
-                    match websocket.read(&mut buf).await.unwrap() {
-                        Message::Text => {
-                            let bytes: &[u8] = &buf[..];
-                            let msg = String::from_utf8_lossy(bytes).to_string();
-                            info!("Websocket message received: {}", msg);
-                            let request: Request = serde_json::from_str(&msg).unwrap();
-                            if request.r#type == RequestType::RequestState {
-                                wine_cask.update_used_by_games(&mut app_state);
-                                wine_cask::websocket_update_state(app_state.clone(), &mut websocket).await;
-                            } else if request.r#type == RequestType::Install {
-                                wine_cask.install_compatibility_tool(request.install.unwrap(), &mut app_state, &mut websocket).await;
-                            } else if request.r#type == RequestType::Uninstall {
-                                wine_cask.uninstall_compatibility_tool(request.uninstall.unwrap(), &mut app_state, &mut websocket).await;
-                            } else if request.r#type == RequestType::Reboot {
-                                app_state.installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
-                                app_state.available_flavors = wine_cask.get_flavors(&app_state.installed_compatibility_tools, true).await;
-                                wine_cask::websocket_update_state(app_state.clone(), &mut websocket).await;
-                            }
-                            //websocket.write(&mut buf, PayloadType::Text).await.unwrap();
-                            buf.clear();
-                        }
-                        Message::Binary => {
-                            websocket.write(&mut buf, PayloadType::Binary).await.unwrap();
-                            buf.clear();
-                        }
-                        Message::Ping(_) | Message::Pong(_) => {
-                            // Ping messages are transparently handled by Ratchet
-                        }
-                        Message::Close(reason) => {
-                            if let Some(reason) = reason {
-                                if let Some(reason_description) = &reason.description {
-                                    info!("Closed websocket connection! Reason: {}", reason_description);
-                                } else {
-                                    info!("Closed websocket connection!");
-                                }
-                            } else {
-                                info!("Closed websocket connection!");
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
+        let wine_cask = WineCask {
+            steam_util,
+            app_state: app_state.clone(),
+        };
+        {
+            let mut appstate = wine_cask.app_state.lock().unwrap();
+            appstate.installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
+            appstate.available_flavors = wine_cask.get_flavors(appstate.installed_compatibility_tools.clone(), false).await;
         }
-        Err(error) => {
-            error!("{}", error);
+
+        let wine_cask_arc = ArcWineCask::new(wine_cask);
+
+        tokio::spawn(wine_cask::process_queue(wine_cask_arc.clone(), state.clone()));
+
+        //let async_wine_cask = AsyncWineCask::new(wine_cask);
+
+        // Create the event loop and TCP listener we'll accept connections on.
+        let try_socket = TcpListener::bind(&addr).await;
+        let listener = try_socket.expect("Failed to bind");
+        println!("Listening on: {}", addr);
+
+        // Let's spawn the handling of each connection in a separate task.
+        while let Ok((stream, addr)) = listener.accept().await {
+            tokio::spawn(handle_connection(wine_cask_arc.clone(), state.clone(), stream, addr));
         }
+
     }
 
+
+    info!("Exiting...");
     Ok(())
 }

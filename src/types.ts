@@ -27,6 +27,7 @@ export type AppState = {
     available_flavors: Flavor[];
     installed_compatibility_tools: SteamCompatibilityTool[];
     in_progress?: QueueCompatibilityTool | null
+    queue: Install[]
 }
 
 export type Flavor = {

@@ -7,7 +7,6 @@ use std::path::PathBuf;
 
 use keyvalues_parser::Vdf;
 use serde::Serialize;
-use tokio_stream::StreamExt;
 
 #[derive(Debug)]
 pub enum SteamUtilError {

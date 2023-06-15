@@ -126,7 +126,7 @@ export default function FlavorTab({ getAppState, getFlavor, getSocket}: { getApp
                                     alignItems: 'center',
                                     paddingBottom: '10px'
                                 }}>
-                                    <span>{release.tag_name}</span>
+                                    <span>{release.tag_name} {getAppState.queue.filter(install => install.install.url == release.url).length == 1 && ("(In Queue)")}</span>
                                     {isItemQueued && (
                                         <div style={{marginLeft: 'auto', paddingLeft: '10px', minWidth: '200px'}}>
                                             <ProgressBarWithInfo nProgress={getAppState.in_progress?.progress}
@@ -151,7 +151,7 @@ export default function FlavorTab({ getAppState, getFlavor, getSocket}: { getApp
                                             onClick={(e: MouseEvent) =>
                                                 showContextMenu(
                                                     <Menu label="Runner Actions">
-                                                        <MenuItem disabled={isQueued} onSelected={() => {
+                                                        <MenuItem onSelected={() => {
                                                         }} onClick={() => {
                                                             handleInstall(release);
                                                         }}>Install</MenuItem>
