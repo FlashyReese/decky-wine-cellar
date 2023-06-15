@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use keyvalues_parser::Vdf;
 use serde::Serialize;
+use tokio_stream::StreamExt;
 
 #[derive(Debug)]
 pub enum SteamUtilError {
@@ -62,66 +63,63 @@ impl SteamUtil {
     }
 
     pub fn read_compatibility_tool_from_vdf_path(&self, compat_tool_vdf: &PathBuf) -> Result<CompatibilityTool, SteamUtilError> {
-        if let Ok(vdf_file) = fs::read_to_string(compat_tool_vdf) {
-            if let Ok(vdf) = Vdf::parse(&vdf_file) {
-                if let Some(compat_tool_obj) = vdf.value.get_obj().unwrap().values().next().unwrap().get(0).unwrap().get_obj()
-                {
-                    let path = compat_tool_vdf //fixme: compat tool vdf has a path key, we can probably use that to resolve
-                        .parent()
-                        .unwrap()
-                        .to_path_buf();
-                    let directory_name = path.file_name().unwrap().to_str().unwrap().to_string();
-                    let internal_name = compat_tool_obj
-                        .keys()
-                        .next()
-                        .unwrap()
-                        .to_string();
-                    let internal_value = compat_tool_obj
-                        .values()
-                        .next()
-                        .unwrap()
-                        .get(0)
-                        .unwrap()
-                        .get_obj()
-                        .unwrap();
-                    let display_name = internal_value
-                        .get("display_name")
-                        .unwrap()
-                        .get(0)
-                        .unwrap()
-                        .get_str()
-                        .unwrap()
-                        .to_string();
-                    let from_os_list = internal_value
-                        .get("from_oslist")
-                        .unwrap()
-                        .get(0)
-                        .unwrap()
-                        .get_str()
-                        .unwrap()
-                        .to_string();
-                    let to_os_list = internal_value
-                        .get("to_oslist")
-                        .unwrap()
-                        .get(0)
-                        .unwrap()
-                        .get_str()
-                        .unwrap()
-                        .to_string();
+        let vdf_text = fs::read_to_string(compat_tool_vdf).map_err(|err| SteamUtilError::VdfParsingError(err.to_string())).unwrap();
+        let vdf = Vdf::parse(&vdf_text).map_err(|err| SteamUtilError::VdfParsingError(err.to_string())).unwrap();
 
-                    let steam_compat_tool = CompatibilityTool {
-                        path,
-                        directory_name,
-                        internal_name,
-                        display_name,
-                        from_os_list,
-                        to_os_list,
-                    };
-                    return Ok(steam_compat_tool);
-                }
-            }
-        }
-        Err(SteamUtilError::VdfParsingError(compat_tool_vdf.to_str().unwrap().to_string()))
+        let compat_tool_obj = vdf.value.get_obj().unwrap().values().next().unwrap().get(0).unwrap().get_obj().unwrap();
+
+        let path = compat_tool_vdf //fixme: compat tool vdf has a path key, we can probably use that to resolve
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let directory_name = path.file_name().unwrap().to_str().unwrap().to_string();
+        let internal_name = compat_tool_obj
+            .keys()
+            .next()
+            .unwrap()
+            .to_string();
+        let internal_value = compat_tool_obj
+            .values()
+            .next()
+            .unwrap()
+            .get(0)
+            .unwrap()
+            .get_obj()
+            .unwrap();
+        let display_name = internal_value
+            .get("display_name")
+            .unwrap()
+            .get(0)
+            .unwrap()
+            .get_str()
+            .unwrap()
+            .to_string();
+        let from_os_list = internal_value
+            .get("from_oslist")
+            .unwrap()
+            .get(0)
+            .unwrap()
+            .get_str()
+            .unwrap()
+            .to_string();
+        let to_os_list = internal_value
+            .get("to_oslist")
+            .unwrap()
+            .get(0)
+            .unwrap()
+            .get_str()
+            .unwrap()
+            .to_string();
+
+        let steam_compat_tool = CompatibilityTool {
+            path,
+            directory_name,
+            internal_name,
+            display_name,
+            from_os_list,
+            to_os_list,
+        };
+        Ok(steam_compat_tool)
     }
 
     pub fn list_compatibility_tools(&self) -> Result<Vec<CompatibilityTool>, SteamUtilError> {
@@ -130,28 +128,15 @@ impl SteamUtil {
             return Err(SteamUtilError::CompatibilityToolsDirectoryNotFound);
         }
 
-        let mut compatibility_tools = Vec::new();
+        let compat_tools: Vec<CompatibilityTool> = fs::read_dir(&compatibility_tools_directory)
+            .map_err(|err| SteamUtilError::CompatibilityToolsDirectoryNotFound)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|x| x.metadata().unwrap().is_dir())
+            .map(|x| self.read_compatibility_tool_from_vdf_path(&x.path().join("compatibilitytool.vdf")).unwrap())
+            .collect();
 
-        if let Ok(entries) = fs::read_dir(compatibility_tools_directory) {
-            for entry in entries {
-                if let Ok(entry) = entry {
-                    if let Ok(metadata) = entry.metadata() {
-                        if metadata.is_dir() {
-                            let compat_tool_vdf = entry.path().join("compatibilitytool.vdf");
-                            if let Ok(compat_tool) =
-                                self.read_compatibility_tool_from_vdf_path(&compat_tool_vdf)
-                            {
-                                compatibility_tools.push(compat_tool);
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            return Err(SteamUtilError::CompatibilityToolsDirectoryNotFound);
-        }
-
-        Ok(compatibility_tools)
+        Ok(compat_tools)
     }
 
     pub fn get_compatibility_tools_mappings(&self) -> Result<HashMap<u64, String>, SteamUtilError> {
@@ -205,53 +190,33 @@ impl SteamUtil {
             return Err(SteamUtilError::SteamAppsDirectoryNotFound);
         }
 
-        let mut steam_apps: Vec<SteamApp> = Vec::new();
+        let apps: Vec<SteamApp> = fs::read_dir(&steam_apps_directory)
+            .map_err(|err| SteamUtilError::SteamAppsDirectoryNotFound)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|x| x.path().extension().unwrap_or_default().eq("acf"))
+            .map(|file| {
+                let app_manifest = fs::read_to_string(file.path()).map_err(|err| SteamUtilError::VdfParsingError(err.to_string())).unwrap();
+                let vdf = Vdf::parse(&app_manifest).map_err(|err| SteamUtilError::VdfParsingError(err.to_string())).unwrap();
+                let app_state_obj = vdf
+                    .value
+                    .get_obj().unwrap();
+                let app_id: u64 = app_state_obj
+                    .get("appid").unwrap()
+                    .get(0).unwrap()
+                    .get_str().unwrap()
+                    .parse()
+                    .unwrap();
+                let name: String = app_state_obj
+                    .get("name").unwrap()
+                    .get(0).unwrap()
+                    .get_str().unwrap()
+                    .to_string();
+                SteamApp { app_id, name }
+            })
+            .collect();
 
-        if let Ok(entries) = fs::read_dir(&steam_apps_directory) {
-            for entry in entries {
-                if let Ok(entry) = entry {
-                    if let Ok(metadata) = entry.metadata() {
-                        if metadata.is_file()
-                            && entry
-                            .file_name()
-                            .to_os_string()
-                            .to_str()
-                            .unwrap()
-                            .ends_with(".acf")
-                        {
-                            if let Ok(app_manifest) = fs::read_to_string(&entry.path()) {
-                                if let Ok(app_manifest_vdf) = Vdf::parse(&app_manifest) {
-                                    let app_state_obj = app_manifest_vdf
-                                        .value
-                                        .get_obj().unwrap();
-                                    let app_id: u64 = app_state_obj
-                                        .get("appid").unwrap()
-                                        .get(0).unwrap()
-                                        .get_str().unwrap()
-                                        .parse()
-                                        .unwrap();
-                                    let name: String = app_state_obj
-                                        .get("name").unwrap()
-                                        .get(0).unwrap()
-                                        .get_str().unwrap()
-                                        .to_string();
-
-                                    steam_apps.push(SteamApp { app_id, name })
-                                } else {
-                                    return Err(SteamUtilError::VdfParsingError(entry.path().to_str().unwrap().to_string()));
-                                }
-                            } else {
-                                return Err(SteamUtilError::VdfParsingError(entry.path().to_str().unwrap().to_string()));
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            return Err(SteamUtilError::SteamAppsDirectoryNotFound);
-        }
-
-        Ok(steam_apps)
+        Ok(apps)
     }
 }
 
