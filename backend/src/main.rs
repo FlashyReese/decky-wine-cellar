@@ -25,7 +25,6 @@ use std::{
 use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
-use std::sync::MutexGuard;
 
 use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, stream::TryStreamExt, StreamExt};
@@ -34,7 +33,7 @@ use log::{info, LevelFilter};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::protocol::Message;
 use crate::steam_util::SteamUtil;
-use crate::wine_cask::{AppState, Request, RequestType, WineCask};
+use crate::wine_cask::{AppState, Request, RequestType, Task, TaskType, WineCask};
 
 type Tx = UnboundedSender<Message>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
@@ -62,15 +61,15 @@ async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stre
             if !msg.is_empty() {
                 let request: Request = serde_json::from_str(&msg).unwrap();
                 if request.r#type == RequestType::RequestState {
-                    //wine_cask.update_used_by_games(&mut app_state);
+                    wine_cask.update_used_by_games();
                     wine_cask.broadcast_app_state(&peer_map);
                 } else if request.r#type == RequestType::Install {
                     wine_cask.add_to_queue(request.install.unwrap());
                 } else if request.r#type == RequestType::Uninstall {
-                    //tokio::spawn(wine_cask.uninstall_compatibility_tool(request.uninstall.unwrap(), &peer_map));
+                    let uninstall = request.uninstall.unwrap().uninstall;
+                    wine_cask.add_to_task_queue(Task{ r#type: TaskType::UninstallCompatibilityTool, uninstall: Some(uninstall) })
                 } else if request.r#type == RequestType::Reboot {
-                    wine_cask.app_state.lock().unwrap().installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
-                    wine_cask.broadcast_app_state(&peer_map);
+                    wine_cask.add_to_task_queue(Task{ r#type: TaskType::Reboot, uninstall: None })
                 }
             }
         }
@@ -124,6 +123,7 @@ async fn main() -> Result<(), IoError> {
             installed_compatibility_tools: Vec::new(),
             in_progress: None,
             queue: VecDeque::new(),
+            task_queue: VecDeque::new(),
         }));
 
         let wine_cask = WineCask {
@@ -139,6 +139,7 @@ async fn main() -> Result<(), IoError> {
         let wine_cask_arc = ArcWineCask::new(wine_cask);
 
         tokio::spawn(wine_cask::process_queue(wine_cask_arc.clone(), state.clone()));
+        //tokio::spawn(wine_cask::process_tasks(wine_cask_arc.clone(), state.clone()));
 
         //let async_wine_cask = AsyncWineCask::new(wine_cask);
 

@@ -131,7 +131,7 @@ impl SteamUtil {
             .map_err(|err| SteamUtilError::CompatibilityToolsDirectoryNotFound)
             .unwrap()
             .filter_map(Result::ok)
-            .filter(|x| x.metadata().unwrap().is_dir())
+            .filter(|x| x.metadata().unwrap().is_dir() && x.path().join("compatibilitytool.vdf").exists())
             .map(|x| self.read_compatibility_tool_from_vdf_path(&x.path().join("compatibilitytool.vdf")).unwrap())
             .collect();
 

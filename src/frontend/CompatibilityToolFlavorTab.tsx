@@ -1,4 +1,5 @@
 import {
+    ConfirmModal,
     DialogBody,
     DialogButton,
     DialogControlsSection,
@@ -6,7 +7,7 @@ import {
     Focusable,
     Menu, MenuItem,
     ProgressBarWithInfo,
-    showContextMenu
+    showContextMenu, showModal
 } from 'decky-frontend-lib';
 import {FaEllipsisH} from 'react-icons/fa';
 import {
@@ -16,7 +17,7 @@ import {
     Request,
     RequestType, SteamCompatibilityTool
 } from "../types";
-import {error} from '../logger';
+import {error, log} from '../logger';
 
 export default function FlavorTab({ getAppState, getFlavor, getSocket}: { getAppState: AppState; getFlavor: Flavor; getSocket: WebSocket }) {
     const handleInstall = (release: GitHubRelease) => {
@@ -38,6 +39,7 @@ export default function FlavorTab({ getAppState, getFlavor, getSocket}: { getApp
     };
 
     const handleUninstall = (release: SteamCompatibilityTool) => {
+        log("are we being called here?");
         if (getSocket && getSocket.readyState === WebSocket.OPEN) {
             const response: Request = {
                 type: RequestType.Uninstall,
@@ -49,10 +51,19 @@ export default function FlavorTab({ getAppState, getFlavor, getSocket}: { getApp
                 },
             };
             getSocket.send(JSON.stringify(response));
+
+            const response2: Request = {
+                type: RequestType.RequestState
+            };
+            getSocket.send(JSON.stringify(response2));
         } else {
             error("WebSocket not alive...");
         }
     };
+
+    const handleUninstallModal = (release: SteamCompatibilityTool) => showModal(
+        <ConfirmModal strTitle={"Uninstallation of " + release.display_name} strDescription={"Are you sure want to remove this compatibility tool?"} strOKButtonText={"Uninstall"} strCancelButtonText={"Cancel"} onOK={() => {handleUninstall(release)}}/>)
+
     return (
         <DialogBody>
             {getFlavor.installed.length != 0 && (
@@ -88,8 +99,8 @@ export default function FlavorTab({ getAppState, getFlavor, getSocket}: { getApp
                                             onClick={(e: MouseEvent) =>
                                                 showContextMenu(
                                                     <Menu label="Runner Actions">
-                                                        <MenuItem disabled={isQueued} onClick={() => {
-                                                            handleUninstall(release);
+                                                        <MenuItem onClick={() => {
+                                                            handleUninstallModal(release);
                                                         }}>Uninstall</MenuItem>
                                                         {release.requires_restart && (
                                                             <MenuItem disabled={isQueued} onClick={() => {

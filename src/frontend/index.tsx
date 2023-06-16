@@ -1,10 +1,9 @@
 import {SidebarNavigation, SidebarNavigationPage} from 'decky-frontend-lib';
 
 import {useEffect, useState} from "react";
-import {AppState, CompatibilityToolFlavor, Request, RequestType} from "../types";
+import {AppState, Request, RequestType} from "../types";
 import {error, log} from "../logger";
 import FlavorTab from "./CompatibilityToolFlavorTab";
-import WebSocketBridge from "../WebSocket";
 import VirtualCompatibilityTools from "./VirtualCompatibilityTools";
 
 export default function ManagePage() {
@@ -13,11 +12,6 @@ export default function ManagePage() {
     const [socket, setSocket] = useState<WebSocket>();
 
     useEffect(() => {
-        /*const socket = WebSocketBridge.getInstance().getWebSocket();
-        setSocket(socket);
-        if (WebSocketBridge.getInstance().getAppState()) {
-            setAppState(WebSocketBridge.getInstance().getAppState())
-        }*/
 
         const socket = new WebSocket("ws://localhost:8887");
         setSocket(socket);
