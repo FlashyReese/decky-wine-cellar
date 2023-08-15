@@ -7,22 +7,22 @@ edition = "2021"
 
 [dependencies]
 # Logging deps
-log = "0.4.18"
+log = "0.4.20"
 env_logger = "0.10.0"
 chrono = "0.4.26"
 # Websocket deps
 reqwest = { version = "0.11.18", default-features = false, features = ["stream", "blocking", "rustls-tls"] }
-tokio-tungstenite = { version = "0.19.0", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.20.0", features = ["rustls-tls-webpki-roots"] }
 futures-channel = "0.3.28"
-tokio = { version = "1.28.2", features = ["macros"] }
+tokio = { version = "1.31.0", features = ["macros"] }
 bytes = "1.4.0"
 futures-util = "0.3.28"
 # Parsing/Extracting deps
 keyvalues-parser = "0.1.0"
-serde = { version = "1.0.164", features = ["derive"] }
-serde_json = "1.0.96"
-tar = "0.4.38"
-flate2 = "1.0.26"
+serde = { version = "1.0.183", features = ["derive"] }
+serde_json = "1.0.104"
+tar = "0.4.40"
+flate2 = "1.0.27"
 xz2 = "0.1.7"
 
 [dev-dependencies]

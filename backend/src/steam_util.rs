@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::{env, fmt};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::PathBuf;
+use std::{env, fmt};
 
 use keyvalues_parser::Vdf;
 use serde::Serialize;
@@ -40,7 +40,9 @@ pub struct SteamApp {
 
 impl SteamUtil {
     pub fn new(steam_home: PathBuf) -> Self {
-        Self { steam_path: steam_home }
+        Self {
+            steam_path: steam_home,
+        }
     }
 
     pub fn find() -> Result<Self, SteamUtilError> {
@@ -51,7 +53,9 @@ impl SteamUtil {
 
         let steam_home = home_path.join(".steam");
         if steam_home.exists() {
-            Ok(Self { steam_path: steam_home })
+            Ok(Self {
+                steam_path: steam_home,
+            })
         } else {
             Err(SteamUtilError::SteamDirectoryNotFound)
         }
@@ -61,22 +65,35 @@ impl SteamUtil {
         self.steam_path.join("root").join("compatibilitytools.d")
     }
 
-    pub fn read_compatibility_tool_from_vdf_path(&self, compat_tool_vdf: &PathBuf) -> Result<CompatibilityTool, SteamUtilError> {
-        let vdf_text = fs::read_to_string(compat_tool_vdf).map_err(|err| SteamUtilError::VdfParsingError(err.to_string())).unwrap();
-        let vdf = Vdf::parse(&vdf_text).map_err(|err| SteamUtilError::VdfParsingError(err.to_string())).unwrap();
+    pub fn read_compatibility_tool_from_vdf_path(
+        &self,
+        compat_tool_vdf: &PathBuf,
+    ) -> Result<CompatibilityTool, SteamUtilError> {
+        let vdf_text = fs::read_to_string(compat_tool_vdf)
+            .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))
+            .unwrap();
+        let vdf = Vdf::parse(&vdf_text)
+            .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))
+            .unwrap();
 
-        let compat_tool_obj = vdf.value.get_obj().unwrap().values().next().unwrap().get(0).unwrap().get_obj().unwrap();
+        let compat_tool_obj = vdf
+            .value
+            .get_obj()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .get(0)
+            .unwrap()
+            .get_obj()
+            .unwrap();
 
         let path = compat_tool_vdf //fixme: compat tool vdf has a path key, we can probably use that to resolve
             .parent()
             .unwrap()
             .to_path_buf();
         let directory_name = path.file_name().unwrap().to_str().unwrap().to_string();
-        let internal_name = compat_tool_obj
-            .keys()
-            .next()
-            .unwrap()
-            .to_string();
+        let internal_name = compat_tool_obj.keys().next().unwrap().to_string();
         let internal_value = compat_tool_obj
             .values()
             .next()
@@ -131,15 +148,24 @@ impl SteamUtil {
             .map_err(|err| SteamUtilError::CompatibilityToolsDirectoryNotFound)
             .unwrap()
             .filter_map(Result::ok)
-            .filter(|x| x.metadata().unwrap().is_dir() && x.path().join("compatibilitytool.vdf").exists())
-            .map(|x| self.read_compatibility_tool_from_vdf_path(&x.path().join("compatibilitytool.vdf")).unwrap())
+            .filter(|x| {
+                x.metadata().unwrap().is_dir() && x.path().join("compatibilitytool.vdf").exists()
+            })
+            .map(|x| {
+                self.read_compatibility_tool_from_vdf_path(&x.path().join("compatibilitytool.vdf"))
+                    .unwrap()
+            })
             .collect();
 
         Ok(compat_tools)
     }
 
     pub fn get_compatibility_tools_mappings(&self) -> Result<HashMap<u64, String>, SteamUtilError> {
-        let steam_config_file = self.steam_path.join("root").join("config").join("config.vdf");
+        let steam_config_file = self
+            .steam_path
+            .join("root")
+            .join("config")
+            .join("config.vdf");
 
         if !steam_config_file.exists() {
             return Err(SteamUtilError::SteamConfigFileNotFound);
@@ -150,30 +176,53 @@ impl SteamUtil {
             if let Ok(config_vdf) = Vdf::parse(&config) {
                 let software_vdf_obj = config_vdf
                     .value
-                    .get_obj().unwrap()
-                    .get("Software").unwrap()
-                    .get(0).unwrap()
-                    .get_obj().unwrap();
+                    .get_obj()
+                    .unwrap()
+                    .get("Software")
+                    .unwrap()
+                    .get(0)
+                    .unwrap()
+                    .get_obj()
+                    .unwrap();
                 let compat_tools_mappings = software_vdf_obj
-                    .get("Valve").or(software_vdf_obj.get("valve")).unwrap()
-                    .get(0).unwrap()
-                    .get_obj().unwrap()
-                    .get("Steam").unwrap()
-                    .get(0).unwrap()
-                    .get_obj().unwrap()
-                    .get("CompatToolMapping").unwrap()
-                    .get(0).unwrap()
-                    .get_obj().unwrap();
+                    .get("Valve")
+                    .or(software_vdf_obj.get("valve"))
+                    .unwrap()
+                    .get(0)
+                    .unwrap()
+                    .get_obj()
+                    .unwrap()
+                    .get("Steam")
+                    .unwrap()
+                    .get(0)
+                    .unwrap()
+                    .get_obj()
+                    .unwrap()
+                    .get("CompatToolMapping")
+                    .unwrap()
+                    .get(0)
+                    .unwrap()
+                    .get_obj()
+                    .unwrap();
                 for (key, value) in compat_tools_mappings {
                     let key: u64 = key.parse().unwrap();
                     let key_obj = value.get(0).unwrap().get_obj().unwrap();
-                    let compat_tool_name = key_obj.get("name").unwrap().get(0).unwrap().get_str().unwrap().to_string();
+                    let compat_tool_name = key_obj
+                        .get("name")
+                        .unwrap()
+                        .get(0)
+                        .unwrap()
+                        .get_str()
+                        .unwrap()
+                        .to_string();
                     if !compat_tool_name.is_empty() {
                         compatibility_tools_mappings.insert(key, compat_tool_name);
                     }
                 }
             } else {
-                return Err(SteamUtilError::VdfParsingError(steam_config_file.to_str().unwrap().to_string()));
+                return Err(SteamUtilError::VdfParsingError(
+                    steam_config_file.to_str().unwrap().to_string(),
+                ));
             }
         } else {
             return Err(SteamUtilError::SteamConfigFileNotFound);
@@ -195,21 +244,29 @@ impl SteamUtil {
             .filter_map(Result::ok)
             .filter(|x| x.path().extension().unwrap_or_default().eq("acf"))
             .map(|file| {
-                let app_manifest = fs::read_to_string(file.path()).map_err(|err| SteamUtilError::VdfParsingError(err.to_string())).unwrap();
-                let vdf = Vdf::parse(&app_manifest).map_err(|err| SteamUtilError::VdfParsingError(err.to_string())).unwrap();
-                let app_state_obj = vdf
-                    .value
-                    .get_obj().unwrap();
+                let app_manifest = fs::read_to_string(file.path())
+                    .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))
+                    .unwrap();
+                let vdf = Vdf::parse(&app_manifest)
+                    .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))
+                    .unwrap();
+                let app_state_obj = vdf.value.get_obj().unwrap();
                 let app_id: u64 = app_state_obj
-                    .get("appid").unwrap()
-                    .get(0).unwrap()
-                    .get_str().unwrap()
+                    .get("appid")
+                    .unwrap()
+                    .get(0)
+                    .unwrap()
+                    .get_str()
+                    .unwrap()
                     .parse()
                     .unwrap();
                 let name: String = app_state_obj
-                    .get("name").unwrap()
-                    .get(0).unwrap()
-                    .get_str().unwrap()
+                    .get("name")
+                    .unwrap()
+                    .get(0)
+                    .unwrap()
+                    .get_str()
+                    .unwrap()
                     .to_string();
                 SteamApp { app_id, name }
             })
@@ -222,18 +279,16 @@ impl SteamUtil {
 impl Display for SteamUtilError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            SteamUtilError::HomeDirectoryNotFound =>
-                write!(f, "Home directory not found"),
-            SteamUtilError::SteamDirectoryNotFound =>
-                write!(f, "Steam directory not found"),
-            SteamUtilError::CompatibilityToolsDirectoryNotFound =>
-                write!(f, "Steam compatibility tools directory not found"),
-            SteamUtilError::SteamAppsDirectoryNotFound =>
-                write!(f, "Steam apps directory not found"),
-            SteamUtilError::SteamConfigFileNotFound =>
-                write!(f, "Steam config file not found"),
-            SteamUtilError::VdfParsingError(msg) =>
-                write!(f, "Failed to parse VDF file: {}", msg),
+            SteamUtilError::HomeDirectoryNotFound => write!(f, "Home directory not found"),
+            SteamUtilError::SteamDirectoryNotFound => write!(f, "Steam directory not found"),
+            SteamUtilError::CompatibilityToolsDirectoryNotFound => {
+                write!(f, "Steam compatibility tools directory not found")
+            }
+            SteamUtilError::SteamAppsDirectoryNotFound => {
+                write!(f, "Steam apps directory not found")
+            }
+            SteamUtilError::SteamConfigFileNotFound => write!(f, "Steam config file not found"),
+            SteamUtilError::VdfParsingError(msg) => write!(f, "Failed to parse VDF file: {}", msg),
         }
     }
 }
@@ -260,15 +315,19 @@ mod tests {
         let steamapps_dir = root_dir.join("steamapps");
 
         // Create necessary directories
-        fs::create_dir_all(&compatibility_tools_dir).expect("Failed to create compatibility tools directory");
+        fs::create_dir_all(&compatibility_tools_dir)
+            .expect("Failed to create compatibility tools directory");
         fs::create_dir_all(&config_dir).expect("Failed to create config directory");
         fs::create_dir_all(&steamapps_dir).expect("Failed to create steamapps directory");
 
         // Create compatibility tool VDF files
         let compat_tool_1_dir = compatibility_tools_dir.join("compat_tool_1");
-        fs::create_dir_all(&compat_tool_1_dir).expect("Failed to create compatibility tool directory");
+        fs::create_dir_all(&compat_tool_1_dir)
+            .expect("Failed to create compatibility tool directory");
         let compat_tool_1_vdf = compat_tool_1_dir.join("compatibilitytool.vdf");
-        fs::write(&compat_tool_1_vdf, r#""compatibilitytools"
+        fs::write(
+            &compat_tool_1_vdf,
+            r#""compatibilitytools"
             {
               "compat_tools"
               {
@@ -280,13 +339,17 @@ mod tests {
                   "to_oslist"    "linux"
                 }
               }
-            }"#)
-            .expect("Failed to write compatibility tool VDF file");
+            }"#,
+        )
+        .expect("Failed to write compatibility tool VDF file");
 
         let compat_tool_2_dir = compatibility_tools_dir.join("compat_tool_2");
-        fs::create_dir_all(&compat_tool_2_dir).expect("Failed to create compatibility tool directory");
+        fs::create_dir_all(&compat_tool_2_dir)
+            .expect("Failed to create compatibility tool directory");
         let compat_tool_2_vdf = compat_tool_2_dir.join("compatibilitytool.vdf");
-        fs::write(&compat_tool_2_vdf, r#""compatibilitytools"
+        fs::write(
+            &compat_tool_2_vdf,
+            r#""compatibilitytools"
             {
               "compat_tools"
               {
@@ -298,11 +361,14 @@ mod tests {
                   "to_oslist"    "linux"
                 }
               }
-            }"#)
-            .expect("Failed to write compatibility tool VDF file");
+            }"#,
+        )
+        .expect("Failed to write compatibility tool VDF file");
 
         // Create Steam config file
-        fs::write(&config_file, r#""InstallConfigStore"
+        fs::write(
+            &config_file,
+            r#""InstallConfigStore"
             {
                 "Software"
                 {
@@ -329,27 +395,34 @@ mod tests {
                     }
                 }
             }
-            "#)
-            .expect("Failed to write Steam config file");
+            "#,
+        )
+        .expect("Failed to write Steam config file");
 
         // Create app manifest files
         let app_manifest_1 = steamapps_dir.join("appmanifest_730.acf");
-        fs::write(&app_manifest_1, r#""AppState"
+        fs::write(
+            &app_manifest_1,
+            r#""AppState"
             {
                 "appid"		"730"
                 "name"		"Counter-Strike: Global Offensive"
             }
-            "#)
-            .expect("Failed to write app manifest file");
+            "#,
+        )
+        .expect("Failed to write app manifest file");
 
         let app_manifest_2 = steamapps_dir.join("appmanifest_1145360.acf");
-        fs::write(&app_manifest_2, r#""AppState"
+        fs::write(
+            &app_manifest_2,
+            r#""AppState"
             {
                 "appid"		"1145360"
                 "name"		"Hades"
             }
-            "#)
-            .expect("Failed to write app manifest file");
+            "#,
+        )
+        .expect("Failed to write app manifest file");
 
         steam_dir
     }

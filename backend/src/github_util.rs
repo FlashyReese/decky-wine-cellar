@@ -1,7 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct Release {
@@ -31,7 +31,10 @@ pub struct Asset {
     pub browser_download_url: String,
 }
 
-pub async fn list_all_releases(owner: &str, repository: &str) -> Result<Vec<Release>, GitHubUtilError> {
+pub async fn list_all_releases(
+    owner: &str,
+    repository: &str,
+) -> Result<Vec<Release>, GitHubUtilError> {
     let client = reqwest::Client::builder()
         .user_agent("FlashyReese/decky-wine-cellar")
         .build()
@@ -46,10 +49,7 @@ pub async fn list_all_releases(owner: &str, repository: &str) -> Result<Vec<Rele
             owner, repository, page
         );
 
-        let response = client
-            .get(&url)
-            .send()
-            .await?;
+        let response = client.get(&url).send().await?;
 
         if response.status().is_success() {
             let response_text = response.text().await?;
@@ -81,10 +81,8 @@ pub enum GitHubUtilError {
 impl Display for GitHubUtilError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            GitHubUtilError::RequestError(json) =>
-                write!(f, "Request Error: {}", json),
-            GitHubUtilError::JsonParsingError(json) =>
-                write!(f, "Failed to parse Json: {}", json),
+            GitHubUtilError::RequestError(json) => write!(f, "Request Error: {}", json),
+            GitHubUtilError::JsonParsingError(json) => write!(f, "Failed to parse Json: {}", json),
         }
     }
 }

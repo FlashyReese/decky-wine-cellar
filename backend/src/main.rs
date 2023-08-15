@@ -1,6 +1,6 @@
+mod github_util;
 mod steam_util;
 mod wine_cask;
-mod github_util;
 
 use env_logger::Env;
 
@@ -14,33 +14,38 @@ solution: is to extract in a tmp directory generate our vdf then copy to our des
 
  */
 
-use std::{
-    io::Write as IoWrite,
-    collections::HashMap,
-    env,
-    io::Error as IoError,
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-};
 use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
+use std::{
+    collections::HashMap,
+    env,
+    io::Error as IoError,
+    io::Write as IoWrite,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
 
 use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, stream::TryStreamExt, StreamExt};
 use log::{info, LevelFilter};
 
-use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::tungstenite::protocol::Message;
 use crate::steam_util::SteamUtil;
 use crate::wine_cask::{AppState, Request, RequestType, Task, TaskType, WineCask};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::tungstenite::protocol::Message;
 
 type Tx = UnboundedSender<Message>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
 type AsyncAppState = Arc<Mutex<AppState>>;
 type ArcWineCask = Arc<WineCask>;
 
-async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stream: TcpStream, addr: SocketAddr) {
+async fn handle_connection(
+    wine_cask: Arc<WineCask>,
+    peer_map: PeerMap,
+    raw_stream: TcpStream,
+    addr: SocketAddr,
+) {
     println!("Incoming TCP connection from: {}", addr);
 
     let ws_stream = tokio_tungstenite::accept_async(raw_stream)
@@ -55,7 +60,11 @@ async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stre
     let (outgoing, incoming) = ws_stream.split();
 
     let broadcast_incoming = incoming.try_for_each(|msg| {
-        println!("Received a message from {}: {}", addr, msg.to_text().unwrap());
+        println!(
+            "Received a message from {}: {}",
+            addr,
+            msg.to_text().unwrap()
+        );
 
         if let Ok(msg) = &msg.to_text() {
             if !msg.is_empty() {
@@ -67,9 +76,15 @@ async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stre
                     wine_cask.add_to_queue(request.install.unwrap());
                 } else if request.r#type == RequestType::Uninstall {
                     let uninstall = request.uninstall.unwrap().uninstall;
-                    wine_cask.add_to_task_queue(Task{ r#type: TaskType::UninstallCompatibilityTool, uninstall: Some(uninstall) })
+                    wine_cask.add_to_task_queue(Task {
+                        r#type: TaskType::UninstallCompatibilityTool,
+                        uninstall: Some(uninstall),
+                    })
                 } else if request.r#type == RequestType::Reboot {
-                    wine_cask.add_to_task_queue(Task{ r#type: TaskType::Reboot, uninstall: None })
+                    wine_cask.add_to_task_queue(Task {
+                        r#type: TaskType::Reboot,
+                        uninstall: None,
+                    })
                 }
             }
         }
@@ -89,7 +104,8 @@ async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stre
 #[tokio::main]
 async fn main() -> Result<(), IoError> {
     // Configure the logger
-    let path = env::var("DECKY_PLUGIN_LOG").unwrap_or("/tmp/decky-wine-cellar.log".parse().unwrap()); // Fixme: Probably separate logs
+    let path =
+        env::var("DECKY_PLUGIN_LOG").unwrap_or("/tmp/decky-wine-cellar.log".parse().unwrap()); // Fixme: Probably separate logs
 
     let target = OpenOptions::new()
         .create(true)
@@ -112,11 +128,14 @@ async fn main() -> Result<(), IoError> {
         .init();
 
     {
-        let addr = env::args().nth(1).unwrap_or_else(|| "127.0.0.1:8887".to_string());
+        let addr = env::args()
+            .nth(1)
+            .unwrap_or_else(|| "127.0.0.1:8887".to_string());
 
         let state = PeerMap::new(Mutex::new(HashMap::new()));
 
-        let steam_util = SteamUtil::new(PathBuf::from(std::env::var("DECKY_USER_HOME").unwrap()).join(".steam"));
+        let steam_util =
+            SteamUtil::new(PathBuf::from(std::env::var("DECKY_USER_HOME").unwrap()).join(".steam"));
 
         let app_state = AsyncAppState::new(Mutex::new(AppState {
             available_flavors: Vec::new(),
@@ -133,12 +152,17 @@ async fn main() -> Result<(), IoError> {
         {
             let mut appstate = wine_cask.app_state.lock().unwrap();
             appstate.installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
-            appstate.available_flavors = wine_cask.get_flavors(appstate.installed_compatibility_tools.clone(), false).await;
+            appstate.available_flavors = wine_cask
+                .get_flavors(appstate.installed_compatibility_tools.clone(), false)
+                .await;
         }
 
         let wine_cask_arc = ArcWineCask::new(wine_cask);
 
-        tokio::spawn(wine_cask::process_queue(wine_cask_arc.clone(), state.clone()));
+        tokio::spawn(wine_cask::process_queue(
+            wine_cask_arc.clone(),
+            state.clone(),
+        ));
         //tokio::spawn(wine_cask::process_tasks(wine_cask_arc.clone(), state.clone()));
 
         //let async_wine_cask = AsyncWineCask::new(wine_cask);
@@ -150,11 +174,14 @@ async fn main() -> Result<(), IoError> {
 
         // Let's spawn the handling of each connection in a separate task.
         while let Ok((stream, addr)) = listener.accept().await {
-            tokio::spawn(handle_connection(wine_cask_arc.clone(), state.clone(), stream, addr));
+            tokio::spawn(handle_connection(
+                wine_cask_arc.clone(),
+                state.clone(),
+                stream,
+                addr,
+            ));
         }
-
     }
-
 
     info!("Exiting...");
     Ok(())

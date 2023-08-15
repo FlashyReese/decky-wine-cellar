@@ -1,21 +1,21 @@
+use crate::steam_util::{CompatibilityTool, SteamUtil};
+use crate::{github_util, PeerMap};
+use flate2::read::GzDecoder;
+use log::info;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::{env, fs, io, thread};
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use flate2::read::GzDecoder;
-use log::info;
-use serde::{Deserialize, Serialize};
+use std::{env, fs, io, thread};
 use tokio_tungstenite::tungstenite::Message;
 use xz2::read::XzDecoder;
-use crate::{github_util, PeerMap};
-use crate::steam_util::{CompatibilityTool, SteamUtil};
 
-use futures_util::StreamExt;
 use crate::github_util::{Asset, Release};
+use futures_util::StreamExt;
 
 // Internal only
 #[derive(Serialize, Deserialize)]
@@ -129,7 +129,7 @@ pub struct AppState {
     pub installed_compatibility_tools: Vec<SteamCompatibilityTool>,
     pub in_progress: Option<QueueCompatibilityTool>,
     pub queue: VecDeque<Install>,
-    pub task_queue: VecDeque<Task>
+    pub task_queue: VecDeque<Task>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -181,7 +181,11 @@ impl WineCask {
 
     pub fn remove_from_queue(&self, install: Install) {
         let mut app_state = self.app_state.lock().unwrap();
-        if let Some(position) = app_state.queue.iter().position(|x| x.install.url == install.install.url) {
+        if let Some(position) = app_state
+            .queue
+            .iter()
+            .position(|x| x.install.url == install.install.url)
+        {
             app_state.queue.remove(position);
             //Todo: Notify removed from queue
         } else {
@@ -212,17 +216,19 @@ impl WineCask {
                 downloaded_size += chunk.len() as u64;
 
                 let progress = ((downloaded_size as f64 / total_size as f64) * 100.0) as u8;
-                if queue_compatibility_tool.progress != progress { // we send an update for every percent instead of time
+                if queue_compatibility_tool.progress != progress {
+                    // we send an update for every percent instead of time
                     queue_compatibility_tool.progress = progress;
                     // Update progress...
                     {
-                        self.app_state.lock().unwrap().in_progress = Some(queue_compatibility_tool.clone());
+                        self.app_state.lock().unwrap().in_progress =
+                            Some(queue_compatibility_tool.clone());
                         self.broadcast_app_state(&peer_map);
                     }
                 }
             }
             let reader = io::Cursor::new(downloaded_bytes); // fixme: probably save this to runtime dir
-            // Mark as extracting...
+                                                            // Mark as extracting...
             {
                 queue_compatibility_tool.state = QueueCompatibilityToolState::Extracting;
                 queue_compatibility_tool.progress = 0;
@@ -232,18 +238,24 @@ impl WineCask {
 
             // Spawn a new thread for the extraction process
             // Why do we need this turns out unpack process is blocking, because of this async function doesn't yield control back to Rust runtime until the extraction is finished.
-            let directory = self.steam_util.get_steam_compatibility_tools_directory().clone();
+            let directory = self
+                .steam_util
+                .get_steam_compatibility_tools_directory()
+                .clone();
             let queue_compatibility_tool_clone = queue_compatibility_tool.clone(); // Clone the queue_compatibility_tool
 
             tokio::task::spawn_blocking(move || {
-                let decompressed: Box<dyn Read> = if queue_compatibility_tool_clone.url.ends_with(".tar.gz") {
-                    Box::new(GzDecoder::new(reader))
-                } else {
-                    Box::new(XzDecoder::new(reader))
-                };
+                let decompressed: Box<dyn Read> =
+                    if queue_compatibility_tool_clone.url.ends_with(".tar.gz") {
+                        Box::new(GzDecoder::new(reader))
+                    } else {
+                        Box::new(XzDecoder::new(reader))
+                    };
                 let mut tar = tar::Archive::new(decompressed);
                 tar.unpack(directory).unwrap();
-            }).await.unwrap();
+            })
+            .await
+            .unwrap();
 
             // Mark as completed
             {
@@ -278,37 +290,63 @@ impl WineCask {
             let first = new_installed_compat_tools.get(0).unwrap();*/
             {
                 let mut app_state = self.app_state.lock().unwrap();
-                app_state.installed_compatibility_tools.push(SteamCompatibilityTool {
-                    path: "".to_string(),
-                    internal_name: queue_compatibility_tool.name.to_string(),
-                    display_name: queue_compatibility_tool.name.to_string(),
-                    requires_restart: true,
-                    used_by_games: vec![],
-                });
+                app_state
+                    .installed_compatibility_tools
+                    .push(SteamCompatibilityTool {
+                        path: "".to_string(),
+                        internal_name: queue_compatibility_tool.name.to_string(),
+                        display_name: queue_compatibility_tool.name.to_string(),
+                        requires_restart: true,
+                        used_by_games: vec![],
+                    });
                 app_state.in_progress = None;
             }
-            let installed = self.app_state.lock().unwrap().installed_compatibility_tools.clone();
-            self.app_state.lock().unwrap().available_flavors = self.get_flavors(installed, false).await;
+            let installed = self
+                .app_state
+                .lock()
+                .unwrap()
+                .installed_compatibility_tools
+                .clone();
+            self.app_state.lock().unwrap().available_flavors =
+                self.get_flavors(installed, false).await;
             self.broadcast_app_state(&peer_map);
-        } else {}
+        } else {
+        }
     }
 
     //fixme: AppState queue to task rather than Install[]
-    pub async fn uninstall_compatibility_tool(&self, steam_compatibility_tool: SteamCompatibilityTool, peer_map: &PeerMap) {
+    pub async fn uninstall_compatibility_tool(
+        &self,
+        steam_compatibility_tool: SteamCompatibilityTool,
+        peer_map: &PeerMap,
+    ) {
         {
             let mut app_state = self.app_state.lock().unwrap();
             let directory_path = PathBuf::from(&steam_compatibility_tool.path);
             recursive_delete_dir_entry(&directory_path).expect("TODO: panic message");
-            if let Some(index) = app_state.installed_compatibility_tools.iter().position(|x| x.internal_name == steam_compatibility_tool.internal_name && x.path == steam_compatibility_tool.path) {
+            if let Some(index) = app_state
+                .installed_compatibility_tools
+                .iter()
+                .position(|x| {
+                    x.internal_name == steam_compatibility_tool.internal_name
+                        && x.path == steam_compatibility_tool.path
+                })
+            {
                 app_state.installed_compatibility_tools.remove(index);
             }
         }
         {
-            let installed = self.app_state.lock().unwrap().installed_compatibility_tools.clone();
-            self.app_state.lock().unwrap().available_flavors = self.get_flavors(installed, false).await;
+            let installed = self
+                .app_state
+                .lock()
+                .unwrap()
+                .installed_compatibility_tools
+                .clone();
+            self.app_state.lock().unwrap().available_flavors =
+                self.get_flavors(installed, false).await;
         }
         self.broadcast_app_state(&peer_map); //fixme: same as before state never received under re-requeststate
-        //websocket_notification("Successfully uninstalled ".to_owned() + name, websocket).await;
+                                             //websocket_notification("Successfully uninstalled ".to_owned() + name, websocket).await;
     }
 
     pub fn broadcast_app_state(&self, peer_map: &PeerMap) {
@@ -325,8 +363,7 @@ impl WineCask {
         let update = serde_json::to_string(&response_new).unwrap();
 
         // We want to broadcast the message to everyone except ourselves.
-        let broadcast_recipients =
-            peers.iter().map(|(_, ws_sink)| ws_sink);
+        let broadcast_recipients = peers.iter().map(|(_, ws_sink)| ws_sink);
 
         for recp in broadcast_recipients {
             recp.unbounded_send(Message::text(&update)).unwrap();
@@ -335,13 +372,49 @@ impl WineCask {
         }
     }
 
-    pub async fn get_flavors(&self, installed_compatibility_tools: Vec<SteamCompatibilityTool>, renew_cache: bool) -> Vec<Flavor> {
+    pub async fn get_flavors(
+        &self,
+        installed_compatibility_tools: Vec<SteamCompatibilityTool>,
+        renew_cache: bool,
+    ) -> Vec<Flavor> {
         let mut flavors = Vec::new();
 
-        let proton_ge_flavor = self.get_flavor(&installed_compatibility_tools, CompatibilityToolFlavor::ProtonGE, "GloriousEggroll", "proton-ge-custom", renew_cache).await;
-        let steam_tinker_launch_flavor = self.get_flavor(&installed_compatibility_tools, CompatibilityToolFlavor::SteamTinkerLaunch, "sonic2kk", "steamtinkerlaunch", renew_cache).await;
-        let luxtorpeda_flavor = self.get_flavor(&installed_compatibility_tools, CompatibilityToolFlavor::Luxtorpeda, "luxtorpeda-dev", "luxtorpeda", renew_cache).await;
-        let boxtron_flavor = self.get_flavor(&installed_compatibility_tools, CompatibilityToolFlavor::Boxtron, "dreamer", "boxtron", renew_cache).await;
+        let proton_ge_flavor = self
+            .get_flavor(
+                &installed_compatibility_tools,
+                CompatibilityToolFlavor::ProtonGE,
+                "GloriousEggroll",
+                "proton-ge-custom",
+                renew_cache,
+            )
+            .await;
+        let steam_tinker_launch_flavor = self
+            .get_flavor(
+                &installed_compatibility_tools,
+                CompatibilityToolFlavor::SteamTinkerLaunch,
+                "sonic2kk",
+                "steamtinkerlaunch",
+                renew_cache,
+            )
+            .await;
+        let luxtorpeda_flavor = self
+            .get_flavor(
+                &installed_compatibility_tools,
+                CompatibilityToolFlavor::Luxtorpeda,
+                "luxtorpeda-dev",
+                "luxtorpeda",
+                renew_cache,
+            )
+            .await;
+        let boxtron_flavor = self
+            .get_flavor(
+                &installed_compatibility_tools,
+                CompatibilityToolFlavor::Boxtron,
+                "dreamer",
+                "boxtron",
+                renew_cache,
+            )
+            .await;
 
         flavors.push(proton_ge_flavor);
         flavors.push(steam_tinker_launch_flavor);
@@ -351,39 +424,49 @@ impl WineCask {
         flavors
     }
 
-    async fn get_flavor(&self, installed_compatibility_tools: &Vec<SteamCompatibilityTool>, compatibility_tool_flavor: CompatibilityToolFlavor, owner: &str, repository: &str, renew_cache: bool) -> Flavor {
-        let github_releases: Vec<Release> = self.get_releases(owner, repository, renew_cache).await.unwrap();
+    async fn get_flavor(
+        &self,
+        installed_compatibility_tools: &Vec<SteamCompatibilityTool>,
+        compatibility_tool_flavor: CompatibilityToolFlavor,
+        owner: &str,
+        repository: &str,
+        renew_cache: bool,
+    ) -> Flavor {
+        let github_releases: Vec<Release> = self
+            .get_releases(owner, repository, renew_cache)
+            .await
+            .unwrap();
 
         let installed: Vec<SteamCompatibilityTool> = installed_compatibility_tools
             .iter()
-            .filter(|tool|
-                github_releases
-                    .iter()
-                    .any(|gh| {
-                        if compatibility_tool_flavor == CompatibilityToolFlavor::ProtonGE {
-                            tool.internal_name == gh.tag_name || tool.display_name == gh.tag_name
-                        } else {
-                            tool.internal_name == compatibility_tool_flavor.to_string() + " " + &gh.tag_name ||
-                                tool.display_name == compatibility_tool_flavor.to_string() + &gh.tag_name
-                        }
-                    })
-            )
+            .filter(|tool| {
+                github_releases.iter().any(|gh| {
+                    if compatibility_tool_flavor == CompatibilityToolFlavor::ProtonGE {
+                        tool.internal_name == gh.tag_name || tool.display_name == gh.tag_name
+                    } else {
+                        tool.internal_name
+                            == compatibility_tool_flavor.to_string() + " " + &gh.tag_name
+                            || tool.display_name
+                                == compatibility_tool_flavor.to_string() + &gh.tag_name
+                    }
+                })
+            })
             .cloned()
             .collect();
         let not_installed: Vec<Release> = github_releases
             .iter()
-            .filter(|gh|
-                !installed
-                    .iter()
-                    .any(|tool| {
-                        if compatibility_tool_flavor == CompatibilityToolFlavor::ProtonGE {
-                            tool.internal_name == gh.tag_name || tool.display_name == gh.tag_name
-                        } else {
-                            tool.internal_name == compatibility_tool_flavor.to_string() + " " + &gh.tag_name ||
-                                tool.display_name == compatibility_tool_flavor.to_string() + &gh.tag_name
-                        }
-                    })
-            )
+            .filter(|gh| {
+                !installed.iter().any(|tool| {
+                    if compatibility_tool_flavor == CompatibilityToolFlavor::ProtonGE {
+                        tool.internal_name == gh.tag_name || tool.display_name == gh.tag_name
+                    } else {
+                        tool.internal_name
+                            == compatibility_tool_flavor.to_string() + " " + &gh.tag_name
+                            || tool.display_name
+                                == compatibility_tool_flavor.to_string() + &gh.tag_name
+                    }
+                })
+            })
             .cloned()
             .collect();
 
@@ -394,7 +477,13 @@ impl WineCask {
         }
     }
 
-    async fn get_releases(&self, owner: &str, repository: &str, renew_cache: bool) -> Option<Vec<Release>> { //fixme: error handling
+    async fn get_releases(
+        &self,
+        owner: &str,
+        repository: &str,
+        renew_cache: bool,
+    ) -> Option<Vec<Release>> {
+        //fixme: error handling
         let path = env::var("DECKY_PLUGIN_RUNTIME_DIR").unwrap_or("/tmp/".parse().unwrap());
 
         let file_name = format!("github_releases_{}_{}_cache.json", owner, repository);
@@ -405,7 +494,9 @@ impl WineCask {
             let github_releases: Vec<Release> = serde_json::from_str(&string).unwrap();
             Some(github_releases)
         } else {
-            let github_releases: Vec<Release> = github_util::list_all_releases(owner, repository).await.unwrap();
+            let github_releases: Vec<Release> = github_util::list_all_releases(owner, repository)
+                .await
+                .unwrap();
             let json = serde_json::to_string(&github_releases).unwrap();
             fs::write(cache_file, json).unwrap();
             Some(github_releases)
@@ -413,14 +504,27 @@ impl WineCask {
     }
 
     fn get_used_by_games(&self, display_name: &str, internal_name: &str) -> Vec<String> {
-        let compat_tools_mapping = self.steam_util.get_compatibility_tools_mappings().expect("Failed to get compatibility tools mappings");
-        let installed_games = self.steam_util.list_installed_games().expect("Failed to get list of installed games");
+        let compat_tools_mapping = self
+            .steam_util
+            .get_compatibility_tools_mappings()
+            .expect("Failed to get compatibility tools mappings");
+        let installed_games = self
+            .steam_util
+            .list_installed_games()
+            .expect("Failed to get list of installed games");
         let used_by_games: Vec<String> = installed_games
             .iter()
-            .filter(|game| compat_tools_mapping.contains_key(&game.app_id) &&
-                (compat_tools_mapping.get(&game.app_id).unwrap().eq(display_name)
-                    || compat_tools_mapping.get(&game.app_id).unwrap().eq(internal_name))
-            )
+            .filter(|game| {
+                compat_tools_mapping.contains_key(&game.app_id)
+                    && (compat_tools_mapping
+                        .get(&game.app_id)
+                        .unwrap()
+                        .eq(display_name)
+                        || compat_tools_mapping
+                            .get(&game.app_id)
+                            .unwrap()
+                            .eq(internal_name))
+            })
             .map(|game| game.name.clone())
             .collect();
         used_by_games
@@ -428,17 +532,22 @@ impl WineCask {
 
     pub fn update_used_by_games(&self) {
         for compat_tool in &mut self.app_state.lock().unwrap().installed_compatibility_tools {
-            compat_tool.used_by_games = self.get_used_by_games(&compat_tool.display_name, &compat_tool.internal_name);
+            compat_tool.used_by_games =
+                self.get_used_by_games(&compat_tool.display_name, &compat_tool.internal_name);
         }
     }
 
     pub fn list_compatibility_tools(&self) -> Option<Vec<SteamCompatibilityTool>> {
-        let compat_tools = self.steam_util.list_compatibility_tools().expect("Failed to get list of compatibility tools");
+        let compat_tools = self
+            .steam_util
+            .list_compatibility_tools()
+            .expect("Failed to get list of compatibility tools");
 
         let mut compatibility_tools: Vec<SteamCompatibilityTool> = Vec::new();
 
         for compat_tool in &compat_tools {
-            let used_by_games: Vec<String> = self.get_used_by_games(&compat_tool.display_name, &compat_tool.internal_name);
+            let used_by_games: Vec<String> =
+                self.get_used_by_games(&compat_tool.display_name, &compat_tool.internal_name);
             //let metadata = self.lookup_virtual_compatibility_tool_metadata(compat_tool);
             compatibility_tools.push(SteamCompatibilityTool {
                 path: compat_tool.path.to_string_lossy().to_string(),
@@ -455,20 +564,32 @@ impl WineCask {
         Some(compatibility_tools)
     }
 
-    fn find_unlisted_directories(&self, installed_compatibility_tools: &Vec<SteamCompatibilityTool>) -> Vec<CompatibilityTool> {
-        self.steam_util.list_compatibility_tools().unwrap().iter().filter(|refresh|
-            !installed_compatibility_tools
-                .iter()
-                .any(|ct| refresh.internal_name == ct.internal_name)
-        ).cloned().collect()
+    fn find_unlisted_directories(
+        &self,
+        installed_compatibility_tools: &Vec<SteamCompatibilityTool>,
+    ) -> Vec<CompatibilityTool> {
+        self.steam_util
+            .list_compatibility_tools()
+            .unwrap()
+            .iter()
+            .filter(|refresh| {
+                !installed_compatibility_tools
+                    .iter()
+                    .any(|ct| refresh.internal_name == ct.internal_name)
+            })
+            .cloned()
+            .collect()
     }
 
-
-    fn lookup_virtual_compatibility_tool_metadata(&self, compat_tool: &CompatibilityTool) -> VirtualCompatibilityToolMetadata {
+    fn lookup_virtual_compatibility_tool_metadata(
+        &self,
+        compat_tool: &CompatibilityTool,
+    ) -> VirtualCompatibilityToolMetadata {
         let metadata_file = compat_tool.path.join("wine-cask-metadata.json"); // fixme: Store in runtime data dir instead
         if metadata_file.exists() && metadata_file.is_file() {
             let metadata = fs::read_to_string(metadata_file).unwrap();
-            let metadata: VirtualCompatibilityToolMetadata = serde_json::from_str(&metadata).unwrap();
+            let metadata: VirtualCompatibilityToolMetadata =
+                serde_json::from_str(&metadata).unwrap();
             metadata
         } else {
             VirtualCompatibilityToolMetadata {
@@ -479,7 +600,10 @@ impl WineCask {
     }
 
     fn create_virtual_compatibility_tool(&self, name: &str, virtual_original_path: PathBuf) {
-        let path = self.steam_util.get_steam_compatibility_tools_directory().join(name);
+        let path = self
+            .steam_util
+            .get_steam_compatibility_tools_directory()
+            .join(name);
         if path.exists() {
             // todo: already exist
         }
@@ -489,7 +613,11 @@ impl WineCask {
 
         // Generate virtual compat tool vdf
         let compat_tool_vdf_path = path.join("compatibilitytool.vdf");
-        let virtual_original = self.steam_util.read_compatibility_tool_from_vdf_path(&compat_tool_vdf_path).unwrap().display_name;
+        let virtual_original = self
+            .steam_util
+            .read_compatibility_tool_from_vdf_path(&compat_tool_vdf_path)
+            .unwrap()
+            .display_name;
         self.generate_compatibility_tool_vdf(compat_tool_vdf_path, &name.replace(' ', "-"), name);
 
         // Create virtual compat tool metadata
@@ -498,12 +626,23 @@ impl WineCask {
             r#virtual: true,
             virtual_original,
         };
-        fs::write(metadata_file, serde_json::to_string_pretty(&metadata).unwrap()).unwrap();
+        fs::write(
+            metadata_file,
+            serde_json::to_string_pretty(&metadata).unwrap(),
+        )
+        .unwrap();
     }
 
-    fn generate_compatibility_tool_vdf(&self, path: PathBuf, internal_name: &str, display_name: &str) {
+    fn generate_compatibility_tool_vdf(
+        &self,
+        path: PathBuf,
+        internal_name: &str,
+        display_name: &str,
+    ) {
         let mut file = File::create(path).expect("Failed to create file");
-        writeln!(file, r#""compatibilitytools"
+        writeln!(
+            file,
+            r#""compatibilitytools"
             {{
               "compat_tools"
               {{
@@ -515,7 +654,10 @@ impl WineCask {
                   "to_oslist"    "linux"
                 }}
               }}
-            }}"#, internal_name, display_name).expect("Failed to write to file");
+            }}"#,
+            internal_name, display_name
+        )
+        .expect("Failed to write to file");
     }
 }
 
@@ -545,12 +687,17 @@ pub fn look_for_compressed_archive(install_request: &Install) -> Option<QueueCom
         });
     }*/
 
-
     let is_compressed = |asset: &Asset| {
         asset.content_type == "application/gzip" || asset.content_type == "application/x-xz"
     };
 
-    if let Some(asset) = install_request.install.assets.clone().into_iter().find(is_compressed) {
+    if let Some(asset) = install_request
+        .install
+        .assets
+        .clone()
+        .into_iter()
+        .find(is_compressed)
+    {
         return Some(QueueCompatibilityTool {
             flavor: install_request.flavor.to_owned(),
             name: install_request.install.tag_name.to_owned(),
@@ -563,18 +710,30 @@ pub fn look_for_compressed_archive(install_request: &Install) -> Option<QueueCom
     None
 }
 
-
 pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
     loop {
         match wine_cask.task_queue_pop_front() {
             Some(task) => {
                 if task.r#type == TaskType::UninstallCompatibilityTool {
-                    wine_cask.uninstall_compatibility_tool(task.uninstall.unwrap(), &peer_map).await;
+                    wine_cask
+                        .uninstall_compatibility_tool(task.uninstall.unwrap(), &peer_map)
+                        .await;
                     wine_cask.broadcast_app_state(&peer_map);
                 } else if task.r#type == TaskType::Reboot {
-                    wine_cask.app_state.lock().unwrap().installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
-                    let installed = wine_cask.app_state.lock().unwrap().installed_compatibility_tools.to_owned();
-                    wine_cask.app_state.lock().unwrap().available_flavors = wine_cask.get_flavors(installed, true).await;
+                    wine_cask
+                        .app_state
+                        .lock()
+                        .unwrap()
+                        .installed_compatibility_tools =
+                        wine_cask.list_compatibility_tools().unwrap();
+                    let installed = wine_cask
+                        .app_state
+                        .lock()
+                        .unwrap()
+                        .installed_compatibility_tools
+                        .to_owned();
+                    wine_cask.app_state.lock().unwrap().available_flavors =
+                        wine_cask.get_flavors(installed, true).await;
                     wine_cask.broadcast_app_state(&peer_map);
                 }
             }
@@ -582,7 +741,9 @@ pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
         }
         match wine_cask.queue_pop_front() {
             Some(install) => {
-                wine_cask.install_compatibility_tool(install, &peer_map).await;
+                wine_cask
+                    .install_compatibility_tool(install, &peer_map)
+                    .await;
             }
             None => {}
         };
