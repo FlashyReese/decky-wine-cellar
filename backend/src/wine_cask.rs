@@ -222,22 +222,29 @@ impl WineCask {
                 }
             }
             let reader = io::Cursor::new(downloaded_bytes); // fixme: probably save this to runtime dir
-            // Mark as extracting... fixme: for some reason this is getting received after unpack is done but it's being send according to the console. edit: websocket client does not receive at time it's suppose to it appears so it's probably getting hold up in queue
+            // Mark as extracting...
             {
                 queue_compatibility_tool.state = QueueCompatibilityToolState::Extracting;
                 queue_compatibility_tool.progress = 0;
                 self.app_state.lock().unwrap().in_progress = Some(queue_compatibility_tool.clone());
                 self.broadcast_app_state(&peer_map);
             }
-            {
-                let decompressed: Box<dyn Read> = if queue_compatibility_tool.url.ends_with(".tar.gz") {
+
+            // Spawn a new thread for the extraction process
+            // Why do we need this turns out unpack process is blocking, because of this async function doesn't yield control back to Rust runtime until the extraction is finished.
+            let directory = self.steam_util.get_steam_compatibility_tools_directory().clone();
+            let queue_compatibility_tool_clone = queue_compatibility_tool.clone(); // Clone the queue_compatibility_tool
+
+            tokio::task::spawn_blocking(move || {
+                let decompressed: Box<dyn Read> = if queue_compatibility_tool_clone.url.ends_with(".tar.gz") {
                     Box::new(GzDecoder::new(reader))
                 } else {
                     Box::new(XzDecoder::new(reader))
                 };
                 let mut tar = tar::Archive::new(decompressed);
-                tar.unpack(self.steam_util.get_steam_compatibility_tools_directory()).unwrap();
-            }
+                tar.unpack(directory).unwrap();
+            }).await.unwrap();
+
             // Mark as completed
             {
                 queue_compatibility_tool.progress = 100;
