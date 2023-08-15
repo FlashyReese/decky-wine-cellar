@@ -49,13 +49,11 @@ pub async fn list_all_releases(owner: &str, repository: &str) -> Result<Vec<Rele
         let response = client
             .get(&url)
             .send()
-            .await
-            .map_err(|err| GitHubUtilError::RequestError(err.to_string()))?;
+            .await?;
 
         if response.status().is_success() {
-            let response_text = response.text().await.unwrap();
-            let page_releases: Vec<Release> = serde_json::from_str(&response_text)
-                .map_err(|err| GitHubUtilError::JsonParsingError(err.to_string())).unwrap();
+            let response_text = response.text().await?;
+            let page_releases: Vec<Release> = serde_json::from_str(&response_text)?;
 
             if page_releases.is_empty() {
                 break; // No more releases, exit the loop
@@ -94,5 +92,17 @@ impl Display for GitHubUtilError {
 impl Error for GitHubUtilError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         None
+    }
+}
+
+impl From<reqwest::Error> for GitHubUtilError {
+    fn from(err: reqwest::Error) -> GitHubUtilError {
+        GitHubUtilError::RequestError(err.to_string())
+    }
+}
+
+impl From<serde_json::Error> for GitHubUtilError {
+    fn from(err: serde_json::Error) -> GitHubUtilError {
+        GitHubUtilError::JsonParsingError(err.to_string())
     }
 }
