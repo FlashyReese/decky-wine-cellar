@@ -3,6 +3,7 @@ import {SidebarNavigation, SidebarNavigationPage} from 'decky-frontend-lib';
 import {useEffect, useState} from "react";
 import {AppState, Request, RequestType} from "../types";
 import {error, log} from "../logger";
+import { v4 as uuidv4 } from 'uuid';
 import FlavorTab from "./CompatibilityToolFlavorTab";
 import VirtualCompatibilityTools from "./VirtualCompatibilityTools";
 
@@ -12,12 +13,13 @@ export default function ManagePage() {
     const [socket, setSocket] = useState<WebSocket>();
 
     useEffect(() => {
-
         const socket = new WebSocket("ws://localhost:8887");
+        const uniqueId = uuidv4(); // Generate a unique identifier
+
         setSocket(socket);
 
         socket.onopen = async () => {
-            log('WebSocket connection established.');
+            log("WebSocket connection established. Unique Identifier:", uniqueId); // Log the unique identifier on connection open
             const response: Request = {
                 type: RequestType.RequestState
             };
@@ -29,21 +31,21 @@ export default function ManagePage() {
             if (response.type == RequestType.UpdateState) {
                 if (response.app_state != null) {
                     setAppState(response.app_state);
+                    console.log(response.app_state);
+                    log("Received app state update");
                 }
             }
         };
 
         socket.onclose = () => {
-            log('WebSocket connection closed.');
+            log("WebSocket connection closed. Unique Identifier:", uniqueId); // Log the unique identifier on connection close
         };
 
         return () => {
             socket.close(); // Close the WebSocket connection on component unmount
         };
-    }, [])
+    }, []);
 
-
-    // todo: We should move releases list to the backend we should be able to construct our pages easily and this way we can atleast list something if our connection is offline
     const pages: (SidebarNavigationPage | "separator")[] = [
         {
             title: "Virtual",

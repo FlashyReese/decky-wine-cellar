@@ -51,11 +51,6 @@ export default function FlavorTab({ getAppState, getFlavor, getSocket}: { getApp
                 },
             };
             getSocket.send(JSON.stringify(response));
-
-            const response2: Request = {
-                type: RequestType.RequestState
-            };
-            getSocket.send(JSON.stringify(response2));
         } else {
             error("WebSocket not alive...");
         }

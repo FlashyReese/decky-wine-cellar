@@ -320,33 +320,32 @@ impl WineCask {
         steam_compatibility_tool: SteamCompatibilityTool,
         peer_map: &PeerMap,
     ) {
-        {
-            let mut app_state = self.app_state.lock().unwrap();
-            let directory_path = PathBuf::from(&steam_compatibility_tool.path);
+        let directory_path = PathBuf::from(&steam_compatibility_tool.path);
+        tokio::task::spawn_blocking(move || {
             recursive_delete_dir_entry(&directory_path).expect("TODO: panic message");
-            if let Some(index) = app_state
+        }).await.unwrap();
+        if let Some(index) = {
+            let mut app_state = self.app_state.lock().unwrap();
+            app_state
                 .installed_compatibility_tools
                 .iter()
                 .position(|x| {
                     x.internal_name == steam_compatibility_tool.internal_name
                         && x.path == steam_compatibility_tool.path
                 })
-            {
-                app_state.installed_compatibility_tools.remove(index);
-            }
         }
         {
-            let installed = self
-                .app_state
-                .lock()
-                .unwrap()
-                .installed_compatibility_tools
-                .clone();
-            self.app_state.lock().unwrap().available_flavors =
-                self.get_flavors(installed, false).await;
+            self.app_state.lock().unwrap().installed_compatibility_tools.remove(index);
         }
+        let installed = self
+            .app_state
+            .lock()
+            .unwrap()
+            .installed_compatibility_tools
+            .clone();
+        self.app_state.lock().unwrap().available_flavors =
+            self.get_flavors(installed, false).await;
         self.broadcast_app_state(&peer_map); //fixme: same as before state never received under re-requeststate
-                                             //websocket_notification("Successfully uninstalled ".to_owned() + name, websocket).await;
     }
 
     pub fn broadcast_app_state(&self, peer_map: &PeerMap) {
@@ -368,7 +367,7 @@ impl WineCask {
         for recp in broadcast_recipients {
             recp.unbounded_send(Message::text(&update)).unwrap();
             info!("Websocket message sent: {}", update);
-            println!("Websocket message sent: {}", update);
+            //println!("Websocket message sent: {}", update);
         }
     }
 
