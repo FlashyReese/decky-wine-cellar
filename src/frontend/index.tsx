@@ -2,7 +2,7 @@ import {SidebarNavigation, SidebarNavigationPage} from 'decky-frontend-lib';
 
 import {useEffect, useState} from "react";
 import {AppState, Request, RequestType} from "../types";
-import {error, log} from "../logger";
+import {log} from "../logger";
 import { v4 as uuidv4 } from 'uuid';
 import FlavorTab from "./CompatibilityToolFlavorTab";
 import VirtualCompatibilityTools from "./VirtualCompatibilityTools";
@@ -46,13 +46,7 @@ export default function ManagePage() {
         };
     }, []);
 
-    const pages: (SidebarNavigationPage | "separator")[] = [
-        {
-            title: "Virtual",
-            content: <VirtualCompatibilityTools/>,
-            route: '/wine-cellar/virtual'
-        }
-    ];
+    const pages: (SidebarNavigationPage | "separator")[] = [];
 
     if (appState != null && socket != null) {
         //const flavor_pages: (SidebarNavigationPage | "separator")[] | { title: CompatibilityToolFlavor; content: JSX.Element; route: string; }[] = []
@@ -65,6 +59,13 @@ export default function ManagePage() {
         })
         //return <SidebarNavigation title="Wine Cellar" showTitle pages={flavor_pages}/>;
     }
+
+    pages.push(
+        {
+            title: "Virtual",
+            content: <VirtualCompatibilityTools/>,
+            route: '/wine-cellar/virtual'
+        });
 
 
     return <SidebarNavigation title="Wine Cellar" showTitle pages={pages}/>;

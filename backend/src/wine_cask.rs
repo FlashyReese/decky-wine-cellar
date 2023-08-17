@@ -10,8 +10,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
-use std::{env, fs, io, thread};
-use tokio_tungstenite::tungstenite::Message;
+use std::{env, fs, io};
+use async_tungstenite::tungstenite::Message;
 use xz2::read::XzDecoder;
 
 use crate::github_util::{Asset, Release};
@@ -210,7 +210,7 @@ impl WineCask {
             let mut downloaded_bytes = Vec::new();
             let mut downloaded_size = 0;
             let mut body = response.bytes_stream();
-            while let Some(chunk_result) = body.next().await {
+            while let Some(chunk_result) = body.next().await { // fixme: we need to timeout when internet connection is lost while downloading...
                 let chunk = chunk_result.unwrap();
                 downloaded_bytes.extend_from_slice(&chunk);
                 downloaded_size += chunk.len() as u64;
@@ -325,7 +325,7 @@ impl WineCask {
             recursive_delete_dir_entry(&directory_path).expect("TODO: panic message");
         }).await.unwrap();
         if let Some(index) = {
-            let mut app_state = self.app_state.lock().unwrap();
+            let app_state = self.app_state.lock().unwrap();
             app_state
                 .installed_compatibility_tools
                 .iter()
