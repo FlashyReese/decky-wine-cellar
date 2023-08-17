@@ -9,7 +9,7 @@ use std::io::Read;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use std::{env, fs, io, thread};
 use tokio_tungstenite::tungstenite::Message;
 use xz2::read::XzDecoder;
@@ -488,17 +488,37 @@ impl WineCask {
         let file_name = format!("github_releases_{}_{}_cache.json", owner, repository);
         let cache_file = PathBuf::from(path).join(file_name);
 
+        let mut renew_cache = renew_cache;
+
         if cache_file.exists() && cache_file.is_file() && !renew_cache {
-            let string = fs::read_to_string(cache_file).unwrap();
-            let github_releases: Vec<Release> = serde_json::from_str(&string).unwrap();
-            Some(github_releases)
-        } else {
+            let metadata = fs::metadata(&cache_file).unwrap();
+            let modified = metadata.modified().unwrap();
+
+            // Calculate the duration between the current time and the file modification time
+            let now = SystemTime::now();
+            let duration = now.duration_since(modified).unwrap_or(Duration::from_secs(0));
+
+            // Check if the cache file is a day or more old (86400 seconds in a day)
+            if duration.as_secs() < 86400 {
+                let string = fs::read_to_string(&cache_file).unwrap();
+                let github_releases: Vec<Release> = serde_json::from_str(&string).unwrap();
+                return Some(github_releases);
+            } else {
+                // Cache file is too old, renew the cache
+                println!("Cache is too old. Renewing cache...");
+                renew_cache = true;
+            }
+        }
+
+        if renew_cache {
             let github_releases: Vec<Release> = github_util::list_all_releases(owner, repository)
                 .await
                 .unwrap();
             let json = serde_json::to_string(&github_releases).unwrap();
             fs::write(cache_file, json).unwrap();
             Some(github_releases)
+        } else {
+            None
         }
     }
 
