@@ -1,7 +1,7 @@
 use crate::steam_util::{CompatibilityTool, SteamUtil};
 use crate::{github_util, PeerMap};
 use flate2::read::GzDecoder;
-use log::info;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fs::File;
@@ -364,10 +364,18 @@ impl WineCask {
         // We want to broadcast the message to everyone except ourselves.
         let broadcast_recipients = peers.iter().map(|(_, ws_sink)| ws_sink);
 
+        let message = Message::text(&update);
         for recp in broadcast_recipients {
-            recp.unbounded_send(Message::text(&update)).unwrap();
-            info!("Websocket message sent: {}", update);
-            //println!("Websocket message sent: {}", update);
+            match recp.unbounded_send(message.clone()) {
+                Ok(_) => {
+                    info!("Websocket message sent: {}", update);
+                    println!("Sent message to recipient");
+                },
+                Err(e) => {
+                    error!("Failed to send websocket message: {}", e);
+                    println!("Failed to send message to recipient");
+                }
+            }
         }
     }
 
@@ -431,48 +439,51 @@ impl WineCask {
         repository: &str,
         renew_cache: bool,
     ) -> Flavor {
-        let github_releases: Vec<Release> = self
-            .get_releases(owner, repository, renew_cache)
-            .await
-            .unwrap();
-
-        let installed: Vec<SteamCompatibilityTool> = installed_compatibility_tools
-            .iter()
-            .filter(|tool| {
-                github_releases.iter().any(|gh| {
-                    if compatibility_tool_flavor == CompatibilityToolFlavor::ProtonGE {
-                        tool.internal_name == gh.tag_name || tool.display_name == gh.tag_name
-                    } else {
-                        tool.internal_name
-                            == compatibility_tool_flavor.to_string() + " " + &gh.tag_name
-                            || tool.display_name
-                                == compatibility_tool_flavor.to_string() + &gh.tag_name
-                    }
+        if let Some(github_releases) = self.get_releases(owner, repository, renew_cache).await {
+            let installed: Vec<SteamCompatibilityTool> = installed_compatibility_tools
+                .iter()
+                .filter(|tool| {
+                    github_releases.iter().any(|gh| {
+                        if compatibility_tool_flavor == CompatibilityToolFlavor::ProtonGE {
+                            tool.internal_name == gh.tag_name || tool.display_name == gh.tag_name
+                        } else {
+                            tool.internal_name
+                                == compatibility_tool_flavor.to_string() + " " + &gh.tag_name
+                                || tool.display_name
+                                    == compatibility_tool_flavor.to_string() + &gh.tag_name
+                        }
+                    })
                 })
-            })
-            .cloned()
-            .collect();
-        let not_installed: Vec<Release> = github_releases
-            .iter()
-            .filter(|gh| {
-                !installed.iter().any(|tool| {
-                    if compatibility_tool_flavor == CompatibilityToolFlavor::ProtonGE {
-                        tool.internal_name == gh.tag_name || tool.display_name == gh.tag_name
-                    } else {
-                        tool.internal_name
-                            == compatibility_tool_flavor.to_string() + " " + &gh.tag_name
-                            || tool.display_name
-                                == compatibility_tool_flavor.to_string() + &gh.tag_name
-                    }
+                .cloned()
+                .collect();
+            let not_installed: Vec<Release> = github_releases
+                .iter()
+                .filter(|gh| {
+                    !installed.iter().any(|tool| {
+                        if compatibility_tool_flavor == CompatibilityToolFlavor::ProtonGE {
+                            tool.internal_name == gh.tag_name || tool.display_name == gh.tag_name
+                        } else {
+                            tool.internal_name
+                                == compatibility_tool_flavor.to_string() + " " + &gh.tag_name
+                                || tool.display_name
+                                    == compatibility_tool_flavor.to_string() + &gh.tag_name
+                        }
+                    })
                 })
-            })
-            .cloned()
-            .collect();
+                .cloned()
+                .collect();
 
-        Flavor {
-            flavor: compatibility_tool_flavor,
-            installed,
-            not_installed,
+            Flavor {
+                flavor: compatibility_tool_flavor,
+                installed,
+                not_installed,
+            }
+        } else {
+            Flavor {
+                flavor: compatibility_tool_flavor,
+                installed: Vec::new(),
+                not_installed: Vec::new(),
+            }
         }
     }
 
@@ -508,6 +519,8 @@ impl WineCask {
                 println!("Cache is too old. Renewing cache...");
                 renew_cache = true;
             }
+        } else {
+            renew_cache = true;
         }
 
         if renew_cache {

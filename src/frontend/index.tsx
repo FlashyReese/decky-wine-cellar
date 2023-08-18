@@ -27,15 +27,20 @@ export default function ManagePage() {
         };
 
         socket.onmessage = async (event) => {
+            log("Received message from server:", event.data);
             const response: Request = JSON.parse(event.data);
             if (response.type == RequestType.UpdateState) {
                 if (response.app_state != null) {
                     setAppState(response.app_state);
                     console.log(response.app_state);
-                    log("Received app state update");
+                    //log("Received app state update");
                 }
             }
         };
+
+        socket.onerror = (error) => {
+            log("WebSocket error:", error);
+        }
 
         socket.onclose = () => {
             log("WebSocket connection closed. Unique Identifier:", uniqueId); // Log the unique identifier on connection close
