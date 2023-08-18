@@ -12,7 +12,7 @@ import {FaShip} from "react-icons/fa";
 import ManagePage from "./frontend";
 import {Request, RequestType} from "./types";
 import {log} from "./logger";
-//import {setupNotifications, unmountNotifications} from "./ws/notifications";
+import {setupToasts} from "./toasts";
 
 const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
     return (
@@ -34,7 +34,7 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
 };
 
 export default definePlugin((serverApi: ServerAPI) => {
-    //fixme: setupNotifications(serverApi);
+    setupToasts(serverApi);
     serverApi.routerHook.addRoute('/wine-cellar', () => {
         return (
             <ManagePage/>

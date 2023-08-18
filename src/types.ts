@@ -38,6 +38,7 @@ export type Flavor = {
 
 export type Request = {
     type: RequestType;
+    notification?: string | null;
     app_state?: AppState | null;
     install?: Install | null;
     uninstall?: Uninstall | null;

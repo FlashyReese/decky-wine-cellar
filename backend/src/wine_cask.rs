@@ -321,9 +321,7 @@ impl WineCask {
         peer_map: &PeerMap,
     ) {
         let directory_path = PathBuf::from(&steam_compatibility_tool.path);
-        tokio::task::spawn_blocking(move || {
-            recursive_delete_dir_entry(&directory_path).expect("TODO: panic message");
-        }).await.unwrap();
+        recursive_delete_dir_entry(&directory_path).expect("TODO: panic message");
         if let Some(index) = {
             let app_state = self.app_state.lock().unwrap();
             app_state
@@ -345,12 +343,11 @@ impl WineCask {
             .clone();
         self.app_state.lock().unwrap().available_flavors =
             self.get_flavors(installed, false).await;
-        self.broadcast_app_state(&peer_map); //fixme: same as before state never received under re-requeststate
+        self.broadcast_app_state(&peer_map);
     }
 
+    // fixme: we have a stupid weird bug where broadcast would work and won't work sometimes, but it's guaranteed to work if 2 clients are connected.
     pub fn broadcast_app_state(&self, peer_map: &PeerMap) {
-        let peers = peer_map.lock().unwrap();
-
         let app_state = self.app_state.lock().unwrap().clone();
 
         let response_new: Request = Request {
@@ -361,11 +358,8 @@ impl WineCask {
         };
         let update = serde_json::to_string(&response_new).unwrap();
 
-        // We want to broadcast the message to everyone except ourselves.
-        let broadcast_recipients = peers.iter().map(|(_, ws_sink)| ws_sink);
-
         let message = Message::text(&update);
-        for recp in broadcast_recipients {
+        for recp in peer_map.lock().unwrap().values() {
             match recp.unbounded_send(message.clone()) {
                 Ok(_) => {
                     info!("Websocket message sent: {}", update);
@@ -750,7 +744,6 @@ pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
                     wine_cask
                         .uninstall_compatibility_tool(task.uninstall.unwrap(), &peer_map)
                         .await;
-                    wine_cask.broadcast_app_state(&peer_map);
                 } else if task.r#type == TaskType::Reboot {
                     wine_cask
                         .app_state
@@ -781,22 +774,3 @@ pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
         };
     }
 }
-
-/*pub async fn process_tasks(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
-    loop {
-        match wine_cask.task_queue_pop_front() {
-            Some(task) => {
-                if task.r#type == TaskType::UninstallCompatibilityTool {
-                    wine_cask.uninstall_compatibility_tool(task.uninstall.unwrap(), &peer_map).await;
-                    wine_cask.broadcast_app_state(&peer_map);
-                } else if task.r#type == TaskType::Reboot {
-                    wine_cask.app_state.lock().unwrap().installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
-                    let installed = wine_cask.app_state.lock().unwrap().installed_compatibility_tools.to_owned();
-                    wine_cask.app_state.lock().unwrap().available_flavors = wine_cask.get_flavors(installed, true).await;
-                    wine_cask.broadcast_app_state(&peer_map);
-                }
-            }
-            None => {}
-        }
-    }
-}*/
