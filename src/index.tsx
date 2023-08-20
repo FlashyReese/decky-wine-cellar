@@ -34,7 +34,7 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
 };
 
 export default definePlugin((serverApi: ServerAPI) => {
-    setupToasts(serverApi);
+    //setupToasts(serverApi);
     serverApi.routerHook.addRoute('/wine-cellar', () => {
         return (
             <ManagePage/>

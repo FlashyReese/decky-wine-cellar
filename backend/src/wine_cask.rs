@@ -115,8 +115,7 @@ pub struct Task {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum TaskType {
-    RequestAppState,
-
+    InstallCompatibilityTool,
     UninstallCompatibilityTool,
     Reboot,
 
@@ -328,7 +327,7 @@ impl WineCask {
             self.get_flavors(installed, false).await;
         self.broadcast_app_state(&peer_map).await;
     }
-    
+
     pub async fn broadcast_app_state(&self, peer_map: &PeerMap) {
         let app_state = self.app_state.lock().await;
         let response_new: Request = Request {
@@ -693,10 +692,7 @@ pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
     loop {
         match wine_cask.task_queue_pop_front().await {
             Some(task) => {
-                if task.r#type == TaskType::RequestAppState {
-                    wine_cask.update_used_by_games().await;
-                    wine_cask.broadcast_app_state(&peer_map).await;
-                } else if task.r#type == TaskType::UninstallCompatibilityTool {
+                if task.r#type == TaskType::UninstallCompatibilityTool {
                     wine_cask
                         .uninstall_compatibility_tool(task.uninstall.unwrap(), &peer_map)
                         .await;

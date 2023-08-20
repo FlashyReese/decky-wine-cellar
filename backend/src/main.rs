@@ -90,8 +90,9 @@ async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stre
 
     let (outgoing, incoming) = ws_stream.split();
 
-    let broadcast_incoming = incoming.try_for_each(|msg| {
+    let broadcast_incoming = incoming.try_for_each_concurrent(Some(10), |msg| {
         let wine_cask_clone = Arc::clone(&wine_cask);
+        let peer_map_clone = Arc::clone(&peer_map);
         async move {
             if msg.is_text() {
                 println!(
@@ -102,7 +103,7 @@ async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stre
 
                 if let Ok(msg) = &msg.to_text() {
                     if !msg.is_empty() {
-                        handle_request(&wine_cask_clone, msg).await;
+                        handle_request(&wine_cask_clone, msg, &peer_map_clone).await;
                     }
                 }
             } else {
@@ -166,14 +167,12 @@ async fn initialize_app_state(wine_cask: &WineCask) {
         .await;
 }
 
-async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str/*, peer_map: &PeerMap*/) {
+async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap) {
     if let Ok(request) = serde_json::from_str::<Request>(&msg) {
         match request.r#type {
             RequestType::RequestState => {
-                wine_cask.add_to_task_queue(Task {
-                    r#type: TaskType::RequestAppState,
-                    uninstall: None,
-                }).await;
+                wine_cask.update_used_by_games().await;
+                wine_cask.broadcast_app_state(&peer_map).await;
             }
             RequestType::Install => {
                 wine_cask.add_to_queue(request.install.unwrap()).await;
