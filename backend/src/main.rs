@@ -2,7 +2,6 @@ mod github_util;
 mod steam_util;
 mod wine_cask;
 
-use async_tungstenite::tungstenite::protocol::Message;
 use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, stream::TryStreamExt, StreamExt};
 use log::{info, LevelFilter};
@@ -12,9 +11,11 @@ use std::fs::OpenOptions;
 use std::io::{Error as IoError, Write as IoWrite};
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use env_logger::Env;
-use smol::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
+use tokio_tungstenite::tungstenite::Message;
 use crate::steam_util::SteamUtil;
 use crate::wine_cask::{AppState, Request, RequestType, Task, TaskType, WineCask};
 
@@ -79,46 +80,46 @@ async fn start_server(addr: String, wine_cask: Arc<WineCask>, state: PeerMap) {
 async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stream: TcpStream, addr: SocketAddr) {
     println!("Incoming TCP connection from: {}", addr);
 
-    let ws_stream = async_tungstenite::accept_async(raw_stream)
+    let ws_stream = tokio_tungstenite::accept_async(raw_stream)
         .await
         .expect("Error during the websocket handshake occurred");
     println!("WebSocket connection established: {}", addr);
 
     let (tx, rx) = unbounded();
-    peer_map.lock().unwrap().insert(addr, tx);
+    peer_map.lock().await.insert(addr, tx);
 
     let (outgoing, incoming) = ws_stream.split();
 
     let broadcast_incoming = incoming.try_for_each(|msg| {
-        if msg.is_text() {
-            println!(
-                "Received a message from {}: {}",
-                addr,
-                msg.to_text().unwrap()
-            );
+        let wine_cask_clone = Arc::clone(&wine_cask);
+        async move {
+            if msg.is_text() {
+                println!(
+                    "Received a message from {}: {}",
+                    addr,
+                    msg.to_text().unwrap()
+                );
 
-            if let Ok(msg) = &msg.to_text() {
-                if !msg.is_empty() {
-                    handle_request(&wine_cask, msg, &peer_map);
+                if let Ok(msg) = &msg.to_text() {
+                    if !msg.is_empty() {
+                        handle_request(&wine_cask_clone, msg).await;
+                    }
                 }
+            } else {
+                println!("Unhandled message from {}: {:?}", addr, msg);
             }
-        } else {
-            println!("Unhandled message from {}: {:?}", addr, msg);
-        }
 
-        future::ok(())
+            Ok(())
+        }
     });
 
     let receive_from_others = rx.map(Ok).forward(outgoing);
 
     pin_mut!(broadcast_incoming, receive_from_others);
-    tokio::select! {
-        _ = broadcast_incoming => {},
-        _ = receive_from_others => {},
-    }
+    future::select(broadcast_incoming, receive_from_others).await;
 
     println!("{} disconnected", &addr);
-    peer_map.lock().unwrap().remove(&addr);
+    peer_map.lock().await.remove(&addr);
 }
 
 fn configure_logger() -> Result<(), IoError> {
@@ -158,35 +159,37 @@ fn get_steam_directory() -> PathBuf {
 }
 
 async fn initialize_app_state(wine_cask: &WineCask) {
-    let mut appstate = wine_cask.app_state.lock().unwrap();
+    let mut appstate = wine_cask.app_state.lock().await;
     appstate.installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
     appstate.available_flavors = wine_cask
         .get_flavors(appstate.installed_compatibility_tools.clone(), false)
         .await;
 }
 
-fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap) {
+async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str/*, peer_map: &PeerMap*/) {
     if let Ok(request) = serde_json::from_str::<Request>(&msg) {
         match request.r#type {
             RequestType::RequestState => {
-                wine_cask.update_used_by_games();
-                wine_cask.broadcast_app_state(&peer_map);
+                wine_cask.add_to_task_queue(Task {
+                    r#type: TaskType::RequestAppState,
+                    uninstall: None,
+                }).await;
             }
             RequestType::Install => {
-                wine_cask.add_to_queue(request.install.unwrap());
+                wine_cask.add_to_queue(request.install.unwrap()).await;
             }
             RequestType::Uninstall => {
                 let uninstall = request.uninstall.unwrap().uninstall;
                 wine_cask.add_to_task_queue(Task {
                     r#type: TaskType::UninstallCompatibilityTool,
                     uninstall: Some(uninstall),
-                })
+                }).await;
             }
             RequestType::Reboot => {
                 wine_cask.add_to_task_queue(Task {
                     r#type: TaskType::Reboot,
                     uninstall: None,
-                })
+                }).await;
             }
             _ => {}
         }
