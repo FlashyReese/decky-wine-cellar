@@ -46,7 +46,7 @@ export default function FlavorTab({ getAppState, getFlavor, getSocket}: { getApp
                 uninstall: {
                     flavor: getFlavor.flavor,
                     uninstall: release,
-                    /*internal_name: release.internal_name, //fixme: we should pass back a directory instead
+                    /*internal_name: release.internal_name, //fixme: we should pass back a directory instead or uuid the backend to use it to find the directory
                     path: release.path,*/
                 },
             };

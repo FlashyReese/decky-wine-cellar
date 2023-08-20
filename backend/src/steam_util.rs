@@ -45,19 +45,29 @@ impl SteamUtil {
         }
     }
 
-    pub fn find() -> Result<Self, SteamUtilError> {
+    pub fn find_steam_directory() -> Result<PathBuf, SteamUtilError> {
         let home_path = env::var_os("HOME")
             .or_else(|| env::var_os("USERPROFILE"))
             .ok_or(SteamUtilError::HomeDirectoryNotFound)
             .map(PathBuf::from)?;
-
         let steam_home = home_path.join(".steam");
         if steam_home.exists() {
-            Ok(Self {
-                steam_path: steam_home,
-            })
+            Ok(steam_home)
         } else {
             Err(SteamUtilError::SteamDirectoryNotFound)
+        }
+    }
+
+    pub fn find() -> Result<Self, SteamUtilError> {
+        match SteamUtil::find_steam_directory() {
+            Ok(steam_home) => {
+                Ok(Self {
+                    steam_path: steam_home,
+                })
+            }
+            Err(err) => {
+                Err(err)
+            }
         }
     }
 
@@ -145,7 +155,7 @@ impl SteamUtil {
         }
 
         let compat_tools: Vec<CompatibilityTool> = fs::read_dir(&compatibility_tools_directory)
-            .map_err(|err| SteamUtilError::CompatibilityToolsDirectoryNotFound)
+            .map_err(|_err| SteamUtilError::CompatibilityToolsDirectoryNotFound)
             .unwrap()
             .filter_map(Result::ok)
             .filter(|x| {
@@ -239,7 +249,7 @@ impl SteamUtil {
         }
 
         let apps: Vec<SteamApp> = fs::read_dir(&steam_apps_directory)
-            .map_err(|err| SteamUtilError::SteamAppsDirectoryNotFound)
+            .map_err(|_err| SteamUtilError::SteamAppsDirectoryNotFound)
             .unwrap()
             .filter_map(Result::ok)
             .filter(|x| x.path().extension().unwrap_or_default().eq("acf"))
@@ -326,7 +336,7 @@ mod tests {
             .expect("Failed to create compatibility tool directory");
         let compat_tool_1_vdf = compat_tool_1_dir.join("compatibilitytool.vdf");
         fs::write(
-            &compat_tool_1_vdf,
+            compat_tool_1_vdf,
             r#""compatibilitytools"
             {
               "compat_tools"
@@ -348,7 +358,7 @@ mod tests {
             .expect("Failed to create compatibility tool directory");
         let compat_tool_2_vdf = compat_tool_2_dir.join("compatibilitytool.vdf");
         fs::write(
-            &compat_tool_2_vdf,
+            compat_tool_2_vdf,
             r#""compatibilitytools"
             {
               "compat_tools"
@@ -367,7 +377,7 @@ mod tests {
 
         // Create Steam config file
         fs::write(
-            &config_file,
+            config_file,
             r#""InstallConfigStore"
             {
                 "Software"
@@ -402,7 +412,7 @@ mod tests {
         // Create app manifest files
         let app_manifest_1 = steamapps_dir.join("appmanifest_730.acf");
         fs::write(
-            &app_manifest_1,
+            app_manifest_1,
             r#""AppState"
             {
                 "appid"		"730"
@@ -414,7 +424,7 @@ mod tests {
 
         let app_manifest_2 = steamapps_dir.join("appmanifest_1145360.acf");
         fs::write(
-            &app_manifest_2,
+            app_manifest_2,
             r#""AppState"
             {
                 "appid"		"1145360"

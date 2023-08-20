@@ -187,7 +187,7 @@ impl WineCask {
                 queue_compatibility_tool.state = QueueCompatibilityToolState::Downloading;
                 queue_compatibility_tool.progress = 0;
                 self.app_state.lock().await.in_progress = Some(queue_compatibility_tool.clone());
-                self.broadcast_app_state(&peer_map).await;
+                self.broadcast_app_state(peer_map).await;
             }
 
             let client = reqwest::Client::new();
@@ -210,7 +210,7 @@ impl WineCask {
                     {
                         self.app_state.lock().await.in_progress =
                             Some(queue_compatibility_tool.clone());
-                        self.broadcast_app_state(&peer_map).await;
+                        self.broadcast_app_state(peer_map).await;
                     }
                 }
             }
@@ -220,7 +220,7 @@ impl WineCask {
                 queue_compatibility_tool.state = QueueCompatibilityToolState::Extracting;
                 queue_compatibility_tool.progress = 0;
                 self.app_state.lock().await.in_progress = Some(queue_compatibility_tool.clone());
-                self.broadcast_app_state(&peer_map).await;
+                self.broadcast_app_state(peer_map).await;
             }
 
             // Spawn a new thread for the extraction process
@@ -228,7 +228,7 @@ impl WineCask {
             let directory = self
                 .steam_util
                 .get_steam_compatibility_tools_directory()
-                .clone();
+                ;
             let queue_compatibility_tool_clone = queue_compatibility_tool.clone(); // Clone the queue_compatibility_tool
 
             tokio::task::spawn_blocking(move || {
@@ -248,7 +248,7 @@ impl WineCask {
             {
                 queue_compatibility_tool.progress = 100;
                 self.app_state.lock().await.in_progress = Some(queue_compatibility_tool.clone());
-                self.broadcast_app_state(&peer_map).await;
+                self.broadcast_app_state(peer_map).await;
             }
             //fixme: terrible workaround
             /*let new_installed_compat_tools = self.find_unlisted_directories(&self.app_state.lock().await.installed_compatibility_tools);
@@ -296,7 +296,7 @@ impl WineCask {
                 .clone();
             self.app_state.lock().await.available_flavors =
                 self.get_flavors(installed, false).await;
-            self.broadcast_app_state(&peer_map).await;
+            self.broadcast_app_state(peer_map).await;
         } else {}
     }
 
@@ -325,7 +325,7 @@ impl WineCask {
             .clone();
         self.app_state.lock().await.available_flavors =
             self.get_flavors(installed, false).await;
-        self.broadcast_app_state(&peer_map).await;
+        self.broadcast_app_state(peer_map).await;
     }
 
     pub async fn broadcast_app_state(&self, peer_map: &PeerMap) {
@@ -337,16 +337,14 @@ impl WineCask {
             uninstall: None,
         };
         let update = serde_json::to_string(&response_new).unwrap();
-        let message = Message::text(update);
+        let message = Message::text(&update);
         for recp in peer_map.lock().await.values() {
             match recp.unbounded_send(message.clone()) {
                 Ok(_) => {
-                    //info!("Websocket message sent: {}", update);
-                    println!("Sent message to recipient");
+                    info!("Websocket message sent: {}", &update);
                 }
                 Err(e) => {
                     error!("Failed to send websocket message: {}", e);
-                    println!("Failed to send message to recipient");
                 }
             }
         }
@@ -473,7 +471,7 @@ impl WineCask {
                 return Some(github_releases);
             } else {
                 // Cache file is too old, renew the cache
-                println!("Cache is too old. Renewing cache...");
+                info!("Cache is too old. Renewing cache...");
                 renew_cache = true;
             }
         } else {
@@ -492,6 +490,9 @@ impl WineCask {
         }
     }
 
+    // todo: We need a hook in the frontend when user sets a compatibility tool to call this function
+    // our current workaround is just update it every time we get a request for the app state; which should be fine for the most part.
+    // it is a problem if we choose to just use a single websocket client for handling the frontend + notifications
     fn get_used_by_games(&self, display_name: &str, internal_name: &str) -> Vec<String> {
         let compat_tools_mapping = self
             .steam_util

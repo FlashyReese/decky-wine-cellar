@@ -4,9 +4,10 @@ mod wine_cask;
 
 use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, stream::TryStreamExt, StreamExt};
-use log::{info, LevelFilter};
+use log::{error, info, LevelFilter};
 use std::collections::{HashMap, VecDeque};
 use std::env;
+use std::env::VarError;
 use std::fs::OpenOptions;
 use std::io::{Error as IoError, Write as IoWrite};
 use std::net::SocketAddr;
@@ -65,7 +66,7 @@ async fn main() -> Result<(), IoError> {
 async fn start_server(addr: String, wine_cask: Arc<WineCask>, state: PeerMap) {
     let try_socket = TcpListener::bind(&addr).await;
     let listener = try_socket.expect("Failed to bind");
-    println!("Listening on: {}", addr);
+    info!("Listening on: {}", addr);
 
     while let Ok((stream, addr)) = listener.accept().await {
         tokio::spawn(handle_connection(
@@ -78,12 +79,12 @@ async fn start_server(addr: String, wine_cask: Arc<WineCask>, state: PeerMap) {
 }
 
 async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stream: TcpStream, addr: SocketAddr) {
-    println!("Incoming TCP connection from: {}", addr);
+    info!("Incoming TCP connection from: {}", addr);
 
     let ws_stream = tokio_tungstenite::accept_async(raw_stream)
         .await
         .expect("Error during the websocket handshake occurred");
-    println!("WebSocket connection established: {}", addr);
+    info!("WebSocket connection established: {}", addr);
 
     let (tx, rx) = unbounded();
     peer_map.lock().await.insert(addr, tx);
@@ -95,7 +96,7 @@ async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stre
         let peer_map_clone = Arc::clone(&peer_map);
         async move {
             if msg.is_text() {
-                println!(
+                info!(
                     "Received a message from {}: {}",
                     addr,
                     msg.to_text().unwrap()
@@ -107,7 +108,7 @@ async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stre
                     }
                 }
             } else {
-                println!("Unhandled message from {}: {:?}", addr, msg);
+                info!("Unhandled message from {}: {:?}", addr, msg);
             }
 
             Ok(())
@@ -119,7 +120,7 @@ async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stre
     pin_mut!(broadcast_incoming, receive_from_others);
     future::select(broadcast_incoming, receive_from_others).await;
 
-    println!("{} disconnected", &addr);
+    info!("{} disconnected", &addr);
     peer_map.lock().await.remove(&addr);
 }
 
@@ -143,9 +144,9 @@ fn configure_logger() -> Result<(), IoError> {
             )
         })
         .filter(None, LevelFilter::Info)
-        .target(env_logger::Target::Pipe(Box::new(target)))
+        //.target(env_logger::Target::Pipe(Box::new(target))) todo: pipe to stdout and file
+        .target(env_logger::Target::Stdout)
         .init();
-
     Ok(())
 }
 
@@ -156,7 +157,20 @@ fn get_server_address() -> String {
 }
 
 fn get_steam_directory() -> PathBuf {
-    PathBuf::from(env::var("DECKY_USER_HOME").unwrap()).join(".steam")
+    match env::var("DECKY_USER_HOME") {
+        Ok(value) => {
+            let steam = PathBuf::from(value).join(".steam");
+            return if steam.exists() {
+                steam
+            } else {
+                SteamUtil::find_steam_directory().unwrap() // Fixme: Handle if no steam folder is found, although this should never happen
+            }
+        }
+        Err(_) => {
+            error!("Couldn't find environment variable DECKY_USER_HOME, using default steam directory");
+            SteamUtil::find_steam_directory().unwrap()
+        }
+    }
 }
 
 async fn initialize_app_state(wine_cask: &WineCask) {
@@ -168,11 +182,11 @@ async fn initialize_app_state(wine_cask: &WineCask) {
 }
 
 async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap) {
-    if let Ok(request) = serde_json::from_str::<Request>(&msg) {
+    if let Ok(request) = serde_json::from_str::<Request>(msg) {
         match request.r#type {
             RequestType::RequestState => {
                 wine_cask.update_used_by_games().await;
-                wine_cask.broadcast_app_state(&peer_map).await;
+                wine_cask.broadcast_app_state(peer_map).await;
             }
             RequestType::Install => {
                 wine_cask.add_to_queue(request.install.unwrap()).await;
