@@ -1,4 +1,4 @@
-lockfileVersion: '6.1'
+lockfileVersion: '6.0'
 
 settings:
   autoInstallPeers: true
@@ -6,11 +6,14 @@ settings:
 
 dependencies:
   decky-frontend-lib:
-    specifier: ^3.21.1
-    version: 3.21.1
+    specifier: ^3.22.0
+    version: 3.22.0
   react-icons:
-    specifier: ^4.4.0
-    version: 4.4.0
+    specifier: ^4.9.0
+    version: 4.9.0
+  uuid:
+    specifier: ^9.0.0
+    version: 9.0.0
 
 devDependencies:
   '@rollup/plugin-commonjs':
@@ -31,6 +34,9 @@ devDependencies:
   '@types/react':
     specifier: 16.14.0
     version: 16.14.0
+  '@types/uuid':
+    specifier: ^9.0.2
+    version: 9.0.2
   '@types/webpack':
     specifier: ^5.28.0
     version: 5.28.0
@@ -218,6 +224,10 @@ packages:
     resolution: {integrity: sha512-yy7HuzQhj0dhGpD8RLXSZWEkLsV9ibvxvi6EiJ3bkqLAO1RGo0WbkWQiwpRlSFymTJRz0d3k5LM3kkx8ArDbLw==}
     dependencies:
       '@types/node': 18.6.1
+    dev: true
+
+  /@types/uuid@9.0.2:
+    resolution: {integrity: sha512-kNnC1GFBLuhImSnV7w4njQkUiJi0ZXUycu1rUaouPqiKlXkh77JKgdRnTAp1x5eBwcIwbtI+3otwzuIDEuDoxQ==}
     dev: true
 
   /@types/webpack@5.28.0:
@@ -434,8 +444,8 @@ packages:
     resolution: {integrity: sha512-uX1KG+x9h5hIJsaKR9xHUeUraxf8IODOwq9JLNPq6BwB04a/xgpq3rcx47l5BZu5zBPlgD342tdke3Hom/nJRA==}
     dev: true
 
-  /decky-frontend-lib@3.21.1:
-    resolution: {integrity: sha512-30605ET9qqZ6St6I9WmMmLGgSrTIdMwo7xy85+lRaF1miUd2icOGEJjwnbVcZDdkal+1fJ3tNEDXlchVfG4TrA==}
+  /decky-frontend-lib@3.22.0:
+    resolution: {integrity: sha512-MJ0y0bhNMHJyMVxHht3O0L0GxdT9sckUmh35HG7/ERqyZQsfKpDqOeW6pC1R07SnuWwgbl4fY3tzjlrb7qUeoA==}
     dev: false
 
   /deepmerge@4.2.2:
@@ -697,8 +707,8 @@ packages:
       safe-buffer: 5.2.1
     dev: true
 
-  /react-icons@4.4.0:
-    resolution: {integrity: sha512-fSbvHeVYo/B5/L4VhB7sBA1i2tS8MkT0Hb9t2H1AVPkwGfVHLJCqyr2Py9dKMxsyM63Eng1GkdZfbWj+Fmv8Rg==}
+  /react-icons@4.9.0:
+    resolution: {integrity: sha512-ijUnFr//ycebOqujtqtV9PFS7JjhWg0QU6ykURVHuL4cbofvRCf3f6GMn9+fBktEFQOIVZnuAYLZdiyadRQRFg==}
     peerDependencies:
       react: '*'
     peerDependenciesMeta:
@@ -882,6 +892,11 @@ packages:
   /url-join@4.0.1:
     resolution: {integrity: sha512-jk1+QP6ZJqyOiuEI9AEWQfju/nB2Pw466kbA0LEZljHwKeMgd9WrAEgEGxjPDD2+TNbbb37rTyhEfrCXfuKXnA==}
     dev: true
+
+  /uuid@9.0.0:
+    resolution: {integrity: sha512-MXcSTerfPa4uqyzStbRoTgt5XIe3x5+42+q1sDuy3R5MDk66URdLMOZe5aPX/SQd+kuYAh0FdP/pO28IkQyTeg==}
+    hasBin: true
+    dev: false
 
   /watchpack@2.4.0:
     resolution: {integrity: sha512-Lcvm7MGST/4fup+ifyKi2hjyIAwcdI4HRgtvTpIUxBRhB+RFtUh8XtDOxUfctVCnhVi+QQj49i91OyvzkJl6cg==}

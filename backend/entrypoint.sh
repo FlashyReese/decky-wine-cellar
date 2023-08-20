@@ -5,16 +5,4 @@ echo "Container's IP address: $(awk 'END{print $1}' /etc/hosts)"
 
 cd /backend
 
-echo "--- Rust version info ---"
-rustup --version
-rustc --version
-cargo --version
-
-echo "--- Building plugin backend ---"
-cargo build --release
-mkdir -p out
-cp target/release/wine-cask out/backend
-
-echo " --- Cleaning up ---"
-# remove root-owned target folder
-cargo clean
+sudo bash build.sh

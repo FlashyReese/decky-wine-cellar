@@ -1,137 +1,74 @@
 import {
+    ConfirmModal,
     DialogBody,
     DialogButton,
     DialogControlsSection,
     DialogControlsSectionHeader,
     Focusable,
-    Menu,
-    MenuItem,
+    Menu, MenuItem,
     ProgressBarWithInfo,
-    showContextMenu
+    showContextMenu, showModal
 } from 'decky-frontend-lib';
 import {FaEllipsisH} from 'react-icons/fa';
-import {useEffect, useState} from 'react';
 import {
     AppState,
-    CompatibilityToolFlavor,
-    GitHubRelease,
-    QueueCompatibilityToolState,
+    Flavor,
+    QueueCompatibilityToolState, GitHubRelease,
     Request,
-    RequestType,
-    SteamCompatibilityTool
-} from "../../types";
-import {error, log} from '../../logger';
+    RequestType, SteamCompatibilityTool
+} from "../types";
+import {error, log} from '../logger';
 
-export async function getGitHubReleases({getUrl}: { getUrl: string; }): Promise<GitHubRelease[]> {
-    return fetch(getUrl, {
-        method: 'GET',
-    }).then(r => r.json());
-}
-
-export default function GitHubReleasesList({getUrl}: { getUrl: string; }) {
-    const [availableReleases, setAvailableReleases] = useState<GitHubRelease[] | null>(null);
-
-    const [installedCompatibilityTools, setInstalledCompatibilityTools] = useState<GitHubRelease[]>([])
-    const [notInstalledCompatibilityTools, setNotInstalledCompatibilityTools] = useState<GitHubRelease[]>([])
-    const [appState, setAppState] = useState<AppState | null>(null);
-
-    const [socket, setSocket] = useState<WebSocket>();
-
-    useEffect(() => {
-        const socket = new WebSocket("ws://localhost:8887");
-        setSocket(socket);
-
-        socket.onopen = async () => {
-            log('WebSocket connection established.');
-            const response: Request = {
-                type: RequestType.RequestState
-            };
-            socket.send(JSON.stringify(response));
-        };
-
-        socket.onmessage = async (event) => {
-            const response: Request = JSON.parse(event.data);
-            if (response.type == RequestType.UpdateState) {
-                const availableReleases = await getGitHubReleases({getUrl});
-                setAvailableReleases(availableReleases);
-                if (response.app_state != null) {
-                    if (availableReleases != null) {
-                        const installedCompatibilityTools = availableReleases.filter((release) =>
-                            response.app_state?.installed_compatibility_tools.map((install: SteamCompatibilityTool) => install.name).includes(release.tag_name)
-                        );
-                        const notInstalledCompatibilityTools = availableReleases.filter((release) =>
-                            !response.app_state?.installed_compatibility_tools?.map((install: SteamCompatibilityTool) => install.name).includes(release.tag_name)
-                        );
-                        setAppState(response.app_state);
-                        setInstalledCompatibilityTools(installedCompatibilityTools);
-                        setNotInstalledCompatibilityTools(notInstalledCompatibilityTools);
-                    }
-                }
-
-            }
-        };
-
-        socket.onclose = () => {
-            log('WebSocket connection closed.');
-        };
-
-        return () => {
-            socket.close(); // Close the WebSocket connection on component unmount
-        };
-    }, [])
-
-
-    if (!availableReleases) {
-        return (
-            <div>
-                <p>Loading...</p>
-            </div>
-        );
-    }
-
+export default function FlavorTab({ getAppState, getFlavor, getSocket}: { getAppState: AppState; getFlavor: Flavor; getSocket: WebSocket }) {
     const handleInstall = (release: GitHubRelease) => {
-        if (socket && socket.readyState === WebSocket.OPEN) {
+        if (getSocket && getSocket.readyState === WebSocket.OPEN) {
             const response: Request = {
                 type: RequestType.Install,
                 install: {
-                    flavor: CompatibilityToolFlavor.ProtonGE,
-                    url: release.url,
+                    flavor: getFlavor.flavor,
+                    install: release,
+                    /*id: release.id,
+                    tag_name: release.tag_name,
+                    url: release.url,*/
                 },
             };
-            socket.send(JSON.stringify(response));
-            log("Requesting install of: " + release.id);
+            getSocket.send(JSON.stringify(response));
         } else {
             error("WebSocket not alive...");
         }
     };
 
-    const handleUninstall = (release: GitHubRelease) => {
-        if (socket && socket.readyState === WebSocket.OPEN) {
+    const handleUninstall = (release: SteamCompatibilityTool) => {
+        log("are we being called here?");
+        if (getSocket && getSocket.readyState === WebSocket.OPEN) {
             const response: Request = {
                 type: RequestType.Uninstall,
                 uninstall: {
-                    flavor: CompatibilityToolFlavor.ProtonGE,
-                    name: release.tag_name,
+                    flavor: getFlavor.flavor,
+                    uninstall: release,
+                    /*internal_name: release.internal_name, //fixme: we should pass back a directory instead or uuid the backend to use it to find the directory
+                    path: release.path,*/
                 },
             };
-            socket.send(JSON.stringify(response));
-            log("Requesting uninstall of: " + release.id);
+            getSocket.send(JSON.stringify(response));
         } else {
             error("WebSocket not alive...");
         }
     };
+
+    const handleUninstallModal = (release: SteamCompatibilityTool) => showModal(
+        <ConfirmModal strTitle={"Uninstallation of " + release.display_name} strDescription={"Are you sure want to remove this compatibility tool?"} strOKButtonText={"Uninstall"} strCancelButtonText={"Cancel"} onOK={() => {handleUninstall(release)}}/>)
+
     return (
         <DialogBody>
-            {installedCompatibilityTools.length != 0 && (
+            {getFlavor.installed.length != 0 && (
                 <DialogControlsSection>
                     <DialogControlsSectionHeader>
                         Installed
                     </DialogControlsSectionHeader>
                     <ul style={{listStyleType: 'none'}}>
-                        {installedCompatibilityTools.map((release: GitHubRelease) => {
-                            const isQueued = appState?.in_progress !== null;
-                            const requiresRestart = appState?.installed_compatibility_tools.filter(ct => (ct.name == release.tag_name || ct.display_name == release.tag_name || ct.internal_name == release.tag_name) && ct.requires_restart).length == 1;
-                            const usedByGame = appState?.installed_compatibility_tools.filter(ct => (ct.name == release.tag_name || ct.display_name == release.tag_name || ct.internal_name == release.tag_name) && ct.used_by_games.length != 0).length == 1;
+                        {getFlavor.installed.map((release: SteamCompatibilityTool) => {
+                            const isQueued = getAppState.in_progress !== null;
                             return (
                                 <li style={{
                                     display: 'flex',
@@ -139,7 +76,7 @@ export default function GitHubReleasesList({getUrl}: { getUrl: string; }) {
                                     alignItems: 'center',
                                     paddingBottom: '10px'
                                 }}>
-                                    <span>{release.tag_name} {requiresRestart && "(Requires Restart)"}{usedByGame && "(Used By Games)"}</span>
+                                    <span>{release.display_name} {release.requires_restart && "(Requires Restart)"}{release.used_by_games.length != 0 && "(Used By Games)"}</span>
                                     <Focusable
                                         style={{
                                             marginLeft: 'auto',
@@ -157,10 +94,10 @@ export default function GitHubReleasesList({getUrl}: { getUrl: string; }) {
                                             onClick={(e: MouseEvent) =>
                                                 showContextMenu(
                                                     <Menu label="Runner Actions">
-                                                        <MenuItem disabled={isQueued} onClick={() => {
-                                                            handleUninstall(release);
+                                                        <MenuItem onClick={() => {
+                                                            handleUninstallModal(release);
                                                         }}>Uninstall</MenuItem>
-                                                        {requiresRestart && (
+                                                        {release.requires_restart && (
                                                             <MenuItem disabled={isQueued} onClick={() => {
                                                                 SteamClient.User.StartRestart();
                                                             }}>Restart Steam</MenuItem>
@@ -179,15 +116,15 @@ export default function GitHubReleasesList({getUrl}: { getUrl: string; }) {
                     </ul>
                 </DialogControlsSection>
             )}
-            {notInstalledCompatibilityTools.length != 0 && (
+            {getFlavor.not_installed.length != 0 && (
                 <DialogControlsSection>
                     <DialogControlsSectionHeader>
                         Not Installed
                     </DialogControlsSectionHeader>
                     <ul>
-                        {notInstalledCompatibilityTools.map((release) => {
-                            const isQueued = appState?.in_progress !== null;
-                            const isItemQueued = isQueued && appState?.in_progress?.name === release.tag_name;
+                        {getFlavor.not_installed.map((release) => {
+                            const isQueued = getAppState.in_progress !== null;
+                            const isItemQueued = isQueued && getAppState.in_progress?.name === release.tag_name;
                             return (
                                 <li style={{
                                     display: 'flex',
@@ -195,12 +132,12 @@ export default function GitHubReleasesList({getUrl}: { getUrl: string; }) {
                                     alignItems: 'center',
                                     paddingBottom: '10px'
                                 }}>
-                                    <span>{release.tag_name}</span>
+                                    <span>{release.tag_name} {getAppState.queue.filter(install => install.install.url == release.url).length == 1 && ("(In Queue)")}</span>
                                     {isItemQueued && (
                                         <div style={{marginLeft: 'auto', paddingLeft: '10px', minWidth: '200px'}}>
-                                            <ProgressBarWithInfo nProgress={appState?.in_progress?.progress}
-                                                                 indeterminate={appState?.in_progress?.state == QueueCompatibilityToolState.Extracting}
-                                                                 sOperationText={appState?.in_progress?.state}/>
+                                            <ProgressBarWithInfo nProgress={getAppState.in_progress?.progress}
+                                                                 indeterminate={getAppState.in_progress?.state == QueueCompatibilityToolState.Extracting}
+                                                                 sOperationText={getAppState.in_progress?.state} bottomSeparator="none"/>
                                         </div>
                                     )}
                                     <Focusable
@@ -220,7 +157,7 @@ export default function GitHubReleasesList({getUrl}: { getUrl: string; }) {
                                             onClick={(e: MouseEvent) =>
                                                 showContextMenu(
                                                     <Menu label="Runner Actions">
-                                                        <MenuItem disabled={isQueued} onSelected={() => {
+                                                        <MenuItem onSelected={() => {
                                                         }} onClick={() => {
                                                             handleInstall(release);
                                                         }}>Install</MenuItem>
