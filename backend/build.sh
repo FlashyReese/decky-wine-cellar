@@ -1,3 +1,5 @@
+#!/bin/bash
+
 echo "--- Rust version info ---"
 rustup --version
 rustc --version

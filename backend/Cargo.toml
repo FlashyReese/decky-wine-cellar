@@ -29,7 +29,7 @@ xz2 = "0.1.7"
 tempfile = "3.6.0"
 
 [profile.release]
-opt-level = 3
+opt-level = "z"
 debug = false
 strip = true
 lto = true
