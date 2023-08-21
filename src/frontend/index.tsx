@@ -6,6 +6,7 @@ import { log } from "../logger";
 import { v4 as uuidv4 } from "uuid";
 import FlavorTab from "./CompatibilityToolFlavorTab";
 import VirtualCompatibilityTools from "./VirtualCompatibilityTools";
+import ManagerTab from "./Manager";
 
 export default function ManagePage() {
   const [appState, setAppState] = useState<AppState | null>(null);
@@ -54,7 +55,14 @@ export default function ManagePage() {
   const pages: (SidebarNavigationPage | "separator")[] = [];
 
   if (appState != null && socket != null) {
-    //const flavor_pages: (SidebarNavigationPage | "separator")[] | { title: CompatibilityToolFlavor; content: JSX.Element; route: string; }[] = []
+    // Regular dashboard
+    pages.push({
+      title: "Dashboard",
+      content: <ManagerTab getAppState={appState} getSocket={socket}/>,
+      route: "/wine-cellar/dashboard",
+    });
+
+    // Flavor pages
     appState.available_flavors.forEach((flavor) => {
       pages.push({
         title: flavor.flavor,
@@ -68,7 +76,6 @@ export default function ManagePage() {
         route: "/wine-cellar/" + flavor.flavor,
       });
     });
-    //return <SidebarNavigation title="Wine Cellar" showTitle pages={flavor_pages}/>;
   }
 
   pages.push({

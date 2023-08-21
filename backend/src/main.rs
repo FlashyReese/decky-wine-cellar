@@ -17,7 +17,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 use crate::steam_util::SteamUtil;
-use crate::wine_cask::{AppState, Request, RequestType, Task, TaskType, WineCask};
+use crate::wine_cask::wine_cask::{AppState, Request, RequestType, Task, WineCask, TaskType};
 
 type Tx = UnboundedSender<Message>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
@@ -142,8 +142,8 @@ fn configure_logger() -> Result<(), IoError> {
             )
         })
         .filter(None, LevelFilter::Info)
-        //.target(env_logger::Target::Pipe(Box::new(target))) todo: pipe to stdout and file
-        .target(env_logger::Target::Stdout)
+        .target(env_logger::Target::Pipe(Box::new(target))) //todo: pipe to stdout and file
+        //.target(env_logger::Target::Stdout)
         .init();
     Ok(())
 }
@@ -161,7 +161,7 @@ fn get_steam_directory() -> PathBuf {
             return if steam.exists() {
                 steam
             } else {
-                SteamUtil::find_steam_directory().unwrap() // Fixme: Handle if no steam folder is found, although this should never happen
+                SteamUtil::find_steam_directory().unwrap() // Todo: Handle if no steam folder is found, although this should never happen
             }
         }
         Err(_) => {

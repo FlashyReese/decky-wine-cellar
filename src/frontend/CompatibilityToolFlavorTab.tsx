@@ -22,7 +22,7 @@ import {
   SteamCompatibilityTool,
   TaskType,
 } from "../types";
-import { error, log } from "../logger";
+import { error } from "../logger";
 
 export default function FlavorTab({
   getAppState,
@@ -40,9 +40,6 @@ export default function FlavorTab({
         install: {
           flavor: getFlavor.flavor,
           release: release,
-          /*id: release.id,
-                              tag_name: release.tag_name,
-                              url: release.url,*/
         },
       };
       getSocket.send(JSON.stringify(response));
@@ -57,9 +54,7 @@ export default function FlavorTab({
         type: RequestType.Uninstall,
         uninstall: {
           flavor: getFlavor.flavor,
-          steam_compatibility_tool: release,
-          /*internal_name: release.internal_name, //fixme: we should pass back a directory instead or uuid the backend to use it to find the directory
-                              path: release.path,*/
+          steam_compatibility_tool: release, //fixme: we should pass back a directory instead or uuid the backend to use it to find the directory
         },
       };
       getSocket.send(JSON.stringify(response));
@@ -72,7 +67,10 @@ export default function FlavorTab({
     showModal(
       <ConfirmModal
         strTitle={"Uninstallation of " + release.display_name}
-        strDescription={"Are you sure want to remove this compatibility tool?"}
+        strDescription={
+          "Are you sure want to remove this compatibility tool? Used by " +
+          release.used_by_games.join(",")
+        }
         strOKButtonText={"Uninstall"}
         strCancelButtonText={"Cancel"}
         onOK={() => {
@@ -222,7 +220,7 @@ export default function FlavorTab({
                         showContextMenu(
                           <Menu label="Runner Actions">
                             <MenuItem
-                                disabled={isItemQueued}
+                              disabled={isItemQueued}
                               onSelected={() => {}}
                               onClick={() => {
                                 handleInstall(release);

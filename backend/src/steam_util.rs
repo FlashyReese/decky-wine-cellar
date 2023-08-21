@@ -9,17 +9,26 @@ use keyvalues_parser::Vdf;
 use log::error;
 use serde::Serialize;
 
-#[derive(Debug)]
+/// Represents errors that can occur while using `SteamUtil`.
+#[derive(Debug, Clone)]
 pub enum SteamUtilError {
+    /// The home directory could not be found.
     HomeDirectoryNotFound,
+    /// The steam directory could not be found.
     SteamDirectoryNotFound,
+    /// The compatibility tools directory could not be found.
     CompatibilityToolsDirectoryNotFound,
+    /// The steam applications directory could not be found.
     SteamAppsDirectoryNotFound,
+    /// The library folders vdf could not be found.
     LibraryFoldersVdfNotFound,
-    SteamConfigFileNotFound,
+    /// The Steam configuration vdf could not be found.
+    SteamConfigVdfNotFound,
+    /// Vdf parsing error, that returns a string with the error.
     VdfParsingError(String),
 }
 
+/// Utility for working with Steam directories and settings.
 pub struct SteamUtil {
     steam_path: PathBuf,
 }
@@ -41,12 +50,14 @@ pub struct SteamApp {
 }
 
 impl SteamUtil {
+    /// Creates a new instance of `SteamUtil` with the given Steam home directory.
     pub fn new(steam_home: PathBuf) -> Self {
         Self {
             steam_path: steam_home,
         }
     }
 
+    /// Finds the Steam directory.
     pub fn find_steam_directory() -> Result<PathBuf, SteamUtilError> {
         let home_path = env::var_os("HOME")
             .or_else(|| env::var_os("USERPROFILE"))
@@ -180,7 +191,7 @@ impl SteamUtil {
             .join("config.vdf");
 
         if !steam_config_file.exists() {
-            return Err(SteamUtilError::SteamConfigFileNotFound);
+            return Err(SteamUtilError::SteamConfigVdfNotFound);
         }
 
         let mut compatibility_tools_mappings: HashMap<u64, String> = HashMap::new();
@@ -237,12 +248,13 @@ impl SteamUtil {
                 ));
             }
         } else {
-            return Err(SteamUtilError::SteamConfigFileNotFound);
+            return Err(SteamUtilError::SteamConfigVdfNotFound);
         }
 
         Ok(compatibility_tools_mappings)
     }
 
+    /// Lists library folders.
     pub fn list_library_folders(&self) -> Result<Vec<PathBuf>, SteamUtilError> {
         let steam_apps_directory = self.steam_path.join("root").join("steamapps");
 
@@ -284,7 +296,8 @@ impl SteamUtil {
         Ok(library_folders)
     }
 
-    pub fn list_installed_games(&self) -> Vec<SteamApp> { // todo: return result for errors but not sure if we should since this is a util
+    /// Lists the installed games across all library folders.
+    pub fn list_installed_games(&self) -> Result<Vec<SteamApp>, SteamUtilError> { // todo: problem is this function can also return partial results because one library folder might be broken but the others might still work properly
         let mut apps: Vec<SteamApp> = Vec::new();
         match self.list_library_folders() {
             Ok(library_folders) => {
@@ -300,15 +313,17 @@ impl SteamUtil {
                         }
                         Err(err) => {
                             error!("Failed to find installed games in library folder {}: {}", &library_folder.to_str().unwrap(), err);
+                            return Err(err.clone());
                         }
                     }
                 }
             }
             Err(err) => {
                 error!("Failed to list library folders: {}", err);
+                return Err(err);
             }
         }
-        apps
+        Ok(apps)
     }
 
     pub fn find_installed_games(&self, steam_apps_directory: PathBuf) -> Result<Vec<SteamApp>, SteamUtilError> {
@@ -364,7 +379,7 @@ impl Display for SteamUtilError {
             SteamUtilError::LibraryFoldersVdfNotFound => {
                 write!(f, "Steam library folders VDF file not found")
             }
-            SteamUtilError::SteamConfigFileNotFound => write!(f, "Steam config file not found"),
+            SteamUtilError::SteamConfigVdfNotFound => write!(f, "Steam config file not found"),
             SteamUtilError::VdfParsingError(msg) => write!(f, "Failed to parse VDF file: {}", msg),
         }
     }
@@ -475,6 +490,30 @@ mod tests {
             "#,
         )
             .expect("Failed to write Steam config file");
+
+        // Create library folders VDF file
+        let library_folders_vdf_file = root_dir.join("steamapps").join("libraryfolders.vdf");
+        fs::write(
+            &library_folders_vdf_file,
+            format!(
+                r#""libraryfolders"
+                {{
+                    "0"
+                    {{
+                        "path"		"{}"
+                        "label"		""
+                        "contentid" ""
+                        "apps" {{
+                            "730"   "1234567890"
+                            "1145360"   "987654321"
+                        }}
+                    }}
+                }}
+                "#,
+                root_dir.as_path().display()  // Path to the temporary directory within libraryfolders
+            ),
+        )
+            .expect("Failed to write library folders VDF file");
 
         // Create app manifest files
         let app_manifest_1 = steamapps_dir.join("appmanifest_730.acf");

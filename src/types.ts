@@ -82,6 +82,7 @@ export type QueueCompatibilityTool = {
 };
 
 export enum CompatibilityToolFlavor {
+  Unknown = "Unknown",
   ProtonGE = "ProtonGE",
   SteamTinkerLaunch = "SteamTinkerLaunch",
   Luxtorpeda = "Luxtorpeda",
