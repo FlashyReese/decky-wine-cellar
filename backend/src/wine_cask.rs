@@ -484,8 +484,7 @@ impl WineCask {
             .expect("Failed to get compatibility tools mappings");
         let installed_games = self
             .steam_util
-            .list_installed_games()
-            .expect("Failed to get list of installed games");
+            .list_installed_games();
         let used_by_games: Vec<String> = installed_games
             .iter()
             .filter(|game| {

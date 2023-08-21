@@ -192,7 +192,7 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
                 }, peer_map).await;
             }
             RequestType::Uninstall => {
-                wine_cask.uninstall_compatibility_tool(request.uninstall.unwrap().steam_compatibcdility_tool, peer_map).await;
+                wine_cask.uninstall_compatibility_tool(request.uninstall.unwrap().steam_compatibility_tool, peer_map).await;
             }
             RequestType::Reboot => {
                 wine_cask.update_installed_compatibility_tools(peer_map).await;

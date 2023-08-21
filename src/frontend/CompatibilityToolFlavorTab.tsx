@@ -52,7 +52,6 @@ export default function FlavorTab({
   };
 
   const handleUninstall = (release: SteamCompatibilityTool) => {
-    log("are we being called here?");
     if (getSocket && getSocket.readyState === WebSocket.OPEN) {
       const response: Request = {
         type: RequestType.Uninstall,
@@ -223,6 +222,7 @@ export default function FlavorTab({
                         showContextMenu(
                           <Menu label="Runner Actions">
                             <MenuItem
+                                disabled={isItemQueued}
                               onSelected={() => {}}
                               onClick={() => {
                                 handleInstall(release);
