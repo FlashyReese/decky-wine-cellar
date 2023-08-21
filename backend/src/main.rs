@@ -7,7 +7,6 @@ use futures_util::{future, pin_mut, stream::TryStreamExt, StreamExt};
 use log::{error, info, LevelFilter};
 use std::collections::{HashMap, VecDeque};
 use std::env;
-use std::env::VarError;
 use std::fs::OpenOptions;
 use std::io::{Error as IoError, Write as IoWrite};
 use std::net::SocketAddr;
@@ -39,7 +38,6 @@ async fn main() -> Result<(), IoError> {
         available_flavors: Vec::new(),
         installed_compatibility_tools: Vec::new(),
         in_progress: None,
-        queue: VecDeque::new(),
         task_queue: VecDeque::new(),
     }));
 
@@ -185,24 +183,19 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
     if let Ok(request) = serde_json::from_str::<Request>(msg) {
         match request.r#type {
             RequestType::RequestState => {
-                wine_cask.update_used_by_games().await;
-                wine_cask.broadcast_app_state(peer_map).await;
+                wine_cask.update_used_by_games(peer_map).await;
             }
             RequestType::Install => {
-                wine_cask.add_to_queue(request.install.unwrap()).await;
+                wine_cask.add_to_task_queue(Task {
+                    r#type: TaskType::InstallCompatibilityTool,
+                    install: Some(request.install.unwrap()),
+                }, peer_map).await;
             }
             RequestType::Uninstall => {
-                let uninstall = request.uninstall.unwrap().uninstall;
-                wine_cask.add_to_task_queue(Task {
-                    r#type: TaskType::UninstallCompatibilityTool,
-                    uninstall: Some(uninstall),
-                }).await;
+                wine_cask.uninstall_compatibility_tool(request.uninstall.unwrap().steam_compatibcdility_tool, peer_map).await;
             }
             RequestType::Reboot => {
-                wine_cask.add_to_task_queue(Task {
-                    r#type: TaskType::Reboot,
-                    uninstall: None,
-                }).await;
+                wine_cask.update_installed_compatibility_tools(peer_map).await;
             }
             _ => {}
         }

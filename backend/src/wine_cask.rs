@@ -58,6 +58,7 @@ pub enum QueueCompatibilityToolState {
     Extracting,
     Downloading,
     Waiting,
+    Cancelling,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -82,7 +83,7 @@ impl std::fmt::Display for CompatibilityToolFlavor {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Install {
     flavor: CompatibilityToolFlavor,
-    install: Release,
+    release: Release,
     /*id: u64,
     tag_name: String,
     url: String,*/
@@ -91,7 +92,7 @@ pub struct Install {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Uninstall {
     pub flavor: CompatibilityToolFlavor,
-    pub uninstall: SteamCompatibilityTool,
+    pub steam_compatibility_tool: SteamCompatibilityTool,
     /*internal_name: String,
     path: String,*/
 }
@@ -110,19 +111,12 @@ pub enum RequestType {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Task {
     pub r#type: TaskType,
-    pub uninstall: Option<SteamCompatibilityTool>,
+    pub install: Option<Install>
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum TaskType {
     InstallCompatibilityTool,
-    UninstallCompatibilityTool,
-    Reboot,
-
-    //
-    CreateVirtual,
-    DeleteVirtual,
-    UpdateVirtual,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -130,7 +124,6 @@ pub struct AppState {
     pub available_flavors: Vec<Flavor>,
     pub installed_compatibility_tools: Vec<SteamCompatibilityTool>,
     pub in_progress: Option<QueueCompatibilityTool>,
-    pub queue: VecDeque<Install>,
     pub task_queue: VecDeque<Task>,
 }
 
@@ -152,28 +145,19 @@ impl WineCask {
         self.app_state.lock().await.task_queue.pop_front()
     }
 
-    pub async fn add_to_task_queue(&self, task: Task) {
+    pub async fn add_to_task_queue(&self, task: Task, peer_map: &PeerMap) {
         self.app_state.lock().await.task_queue.push_back(task);
+        self.broadcast_app_state(peer_map).await;
     }
 
-    async fn queue_pop_front(&self) -> Option<Install> {
-        self.app_state.lock().await.queue.pop_front()
-    }
-
-    pub async fn add_to_queue(&self, queue_compatibility: Install) {
-        self.app_state.lock().await.queue.push_back(queue_compatibility);
-
-        //todo: verify if already in queue
-    }
-
-    pub async fn remove_from_queue(&self, install: Install) {
+    pub async fn remove_from_task_queue(&self, install: Install) {
         let mut app_state = self.app_state.lock().await;
         if let Some(position) = app_state
-            .queue
+            .task_queue
             .iter()
-            .position(|x| x.install.url == install.install.url)
+            .position(|x| x.install.clone().unwrap().release.url == install.release.url)
         {
-            app_state.queue.remove(position);
+            app_state.task_queue.remove(position);
             //Todo: Notify removed from queue
         } else {
             //Todo: Notify none found
@@ -520,11 +504,12 @@ impl WineCask {
         used_by_games
     }
 
-    pub async fn update_used_by_games(&self) {
+    pub async fn update_used_by_games(&self, peer_map: &PeerMap) {
         for compat_tool in &mut self.app_state.lock().await.installed_compatibility_tools {
             compat_tool.used_by_games =
                 self.get_used_by_games(&compat_tool.display_name, &compat_tool.internal_name);
         }
+        self.broadcast_app_state(peer_map).await;
     }
 
     pub fn list_compatibility_tools(&self) -> Option<Vec<SteamCompatibilityTool>> {
@@ -638,6 +623,13 @@ impl WineCask {
         )
             .expect("Failed to write to file");
     }
+
+    pub async fn update_installed_compatibility_tools(&self, peer_map: &PeerMap) {
+        self.app_state.lock().await.installed_compatibility_tools = self.list_compatibility_tools().unwrap();
+        let installed = self.app_state.lock().await.installed_compatibility_tools.clone();
+        self.app_state.lock().await.available_flavors = self.get_flavors(installed, true).await;
+        self.broadcast_app_state(peer_map).await;
+    }
 }
 
 fn recursive_delete_dir_entry(entry_path: &std::path::Path) -> io::Result<()> {
@@ -671,7 +663,7 @@ pub fn look_for_compressed_archive(install_request: &Install) -> Option<QueueCom
     };
 
     if let Some(asset) = install_request
-        .install
+        .release
         .assets
         .clone()
         .into_iter()
@@ -679,7 +671,7 @@ pub fn look_for_compressed_archive(install_request: &Install) -> Option<QueueCom
     {
         return Some(QueueCompatibilityTool {
             flavor: install_request.flavor.to_owned(),
-            name: install_request.install.tag_name.to_owned(),
+            name: install_request.release.tag_name.to_owned(),
             url: asset.browser_download_url,
             state: QueueCompatibilityToolState::Extracting,
             progress: 0,
@@ -693,37 +685,13 @@ pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
     loop {
         match wine_cask.task_queue_pop_front().await {
             Some(task) => {
-                if task.r#type == TaskType::UninstallCompatibilityTool {
+                if task.r#type == TaskType::InstallCompatibilityTool {
                     wine_cask
-                        .uninstall_compatibility_tool(task.uninstall.unwrap(), &peer_map)
+                        .install_compatibility_tool(task.install.unwrap(), &peer_map)
                         .await;
-                } else if task.r#type == TaskType::Reboot {
-                    wine_cask
-                        .app_state
-                        .lock()
-                        .await
-                        .installed_compatibility_tools =
-                        wine_cask.list_compatibility_tools().unwrap();
-                    let installed = wine_cask
-                        .app_state
-                        .lock()
-                        .await
-                        .installed_compatibility_tools
-                        .to_owned();
-                    wine_cask.app_state.lock().await.available_flavors =
-                        wine_cask.get_flavors(installed, true).await;
-                    wine_cask.broadcast_app_state(&peer_map).await;
                 }
             }
             None => {}
         }
-        match wine_cask.queue_pop_front().await {
-            Some(install) => {
-                wine_cask
-                    .install_compatibility_tool(install, &peer_map)
-                    .await;
-            }
-            None => {}
-        };
     }
 }
