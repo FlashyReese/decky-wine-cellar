@@ -9,6 +9,7 @@ pub struct Release {
     pub id: u64,
     pub draft: bool,
     pub prerelease: bool,
+    pub name: String,
     pub tag_name: String,
     pub assets: Vec<Asset>,
     pub created_at: String,

@@ -3,6 +3,7 @@ export type GitHubRelease = {
   id: number;
   draft: boolean;
   prerelease: boolean;
+  name: String;
   tag_name: String;
   assets: Asset[];
   created_at: String;

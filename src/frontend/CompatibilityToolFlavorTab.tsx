@@ -1,15 +1,15 @@
 import {
-  ConfirmModal,
-  DialogBody,
-  DialogButton,
-  DialogControlsSection,
-  DialogControlsSectionHeader,
-  Focusable,
-  Menu,
-  MenuItem,
-  ProgressBarWithInfo,
-  showContextMenu,
-  showModal,
+    ConfirmModal,
+    DialogBody,
+    DialogButton,
+    DialogControlsSection,
+    DialogControlsSectionHeader,
+    Focusable,
+    Menu,
+    MenuItem,
+    ProgressBarWithInfo,
+    showContextMenu,
+    showModal,
 } from "decky-frontend-lib";
 import { FaEllipsisH } from "react-icons/fa";
 import {
@@ -23,6 +23,34 @@ import {
   TaskType,
 } from "../types";
 import { error } from "../logger";
+import {Markdown} from "../components/Markdown";
+
+function ChangeLogModal({ release, closeModal }: { release: GitHubRelease; closeModal?: () => {} }) {
+  return (
+      <Focusable onCancelButton={closeModal}>
+          <Focusable
+              onActivate={() => {}}
+              style={{
+                  marginTop: '40px',
+                  height: 'calc( 100% - 40px )',
+                  overflowY: 'scroll',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  margin: '40px',
+              }}
+          >
+              <div>
+                  <h1>{release.name}</h1>
+                  {release.body ? (
+                      <Markdown>{`${release.body}`}</Markdown>
+                  ) : (
+                      'no patch notes for this version'
+                  )}
+              </div>
+          </Focusable>
+      </Focusable>
+  );
+}
 
 export default function FlavorTab({
   getAppState,
@@ -78,6 +106,11 @@ export default function FlavorTab({
         }}
       />,
     );
+
+  const handleViewChangeLog = (release: GitHubRelease) =>
+      showModal(
+          <ChangeLogModal release={release}/>
+      );
 
   return (
     <DialogBody>
@@ -227,6 +260,13 @@ export default function FlavorTab({
                               }}
                             >
                               Install
+                            </MenuItem>
+                            <MenuItem
+                                onClick={() => {
+                                  handleViewChangeLog(release);
+                                }}
+                            >
+                              View Change Log
                             </MenuItem>
                           </Menu>,
                           e.currentTarget ?? window,

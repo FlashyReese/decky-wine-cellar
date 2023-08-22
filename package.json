@@ -42,6 +42,8 @@
   "dependencies": {
     "decky-frontend-lib": "^3.22.0",
     "react-icons": "^4.10.1",
+    "react-markdown": "^8.0.7",
+    "remark-gfm": "^3.0.1",
     "uuid": "^9.0.0"
   },
   "pnpm": {

@@ -6,7 +6,7 @@ use flate2::bufread::GzDecoder;
 use serde::{Deserialize, Serialize};
 use xz2::bufread::XzDecoder;
 use futures_util::StreamExt;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use crate::github_util::{Asset, Release};
 use crate::PeerMap;
 use crate::wine_cask::flavors::CompatibilityToolFlavor;
@@ -147,12 +147,12 @@ impl WineCask {
                 };
                 std::fs::rename(&first, &new_path).unwrap();
 
-
                 match copy_dir(&temp_dir, &steam_compatibility_tools_directory) {
-                    Ok(_) => info!("Directory copied successfully."),
+                    Ok(_) => debug!("Directory copied successfully."),
                     Err(e) => error!("Failed to copy directory: {}", e),
                 }
 
+                // fixme: if we ever make downloads asynchronous rather than task queue, this will not work
                 let unlisted = self.find_unlisted_directories(&self.app_state.lock().await.installed_compatibility_tools);
                 if unlisted.len() == 1 {
                     let new_installed = unlisted.first().unwrap();
