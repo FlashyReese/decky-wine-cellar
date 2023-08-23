@@ -21,22 +21,8 @@ impl WineCask {
             return;
         }
 
+        self.sync_backend_with_installed_compat_tools().await;
         let mut app_state = self.app_state.lock().await;
-        if let Some(index) = app_state
-            .installed_compatibility_tools
-            .iter()
-            .position(|x| {
-                x.internal_name == steam_compatibility_tool.internal_name
-                    && x.path == steam_compatibility_tool.path
-            })
-        {
-            app_state.installed_compatibility_tools.remove(index);
-        } else {
-            error!("Error removing compatibility tool from app state... it's possibly already removed?");
-            // todo: send a toast notification to the client
-            return;
-        }
-
         let installed = app_state.installed_compatibility_tools.clone();
         app_state.available_flavors = self.get_flavors(installed, false).await;
         drop(app_state);

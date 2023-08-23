@@ -1,7 +1,7 @@
 /**
  * Represents information about a compatibility tool.
  */
-interface CompatToolInfo {
+export interface CompatToolInfo {
     /** Name of the compatibility tool. */
     strToolName: string;
     /** Display name of the compatibility tool. */

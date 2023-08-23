@@ -152,23 +152,17 @@ impl WineCask {
                     Err(e) => error!("Failed to copy directory: {}", e),
                 }
 
-                // fixme: if we ever make downloads asynchronous rather than task queue, this will not work
-                let unlisted = self.find_unlisted_directories(&self.app_state.lock().await.installed_compatibility_tools);
-                if unlisted.len() == 1 {
-                    let new_installed = unlisted.first().unwrap();
-                    self.app_state.lock().await.installed_compatibility_tools.push(self.to_steam_compatibility_tool(new_installed, true));
-                    let installed = self
-                        .app_state
-                        .lock()
-                        .await
-                        .installed_compatibility_tools
-                        .clone();
-                    self.app_state.lock().await.available_flavors =
-                        self.get_flavors(installed, false).await;
-                    self.broadcast_app_state(peer_map).await;
-                } else {
-                    error!("Failed to find unlisted directory");
-                }
+
+                self.sync_backend_with_installed_compat_tools().await;
+                let installed = self
+                    .app_state
+                    .lock()
+                    .await
+                    .installed_compatibility_tools
+                    .clone();
+                self.app_state.lock().await.available_flavors =
+                    self.get_flavors(installed, false).await;
+                self.broadcast_app_state(peer_map).await;
             } else {
                 error!("Failed to find extracted directory");
             }

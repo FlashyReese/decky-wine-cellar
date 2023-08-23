@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 use crate::PeerMap;
 use crate::steam_util::{CompatibilityTool, SteamUtil};
-use crate::wine_cask::flavors::{Flavor, SteamCompatibilityTool};
+use crate::wine_cask::flavors::{Flavor, SteamClientCompatToolInfo, SteamCompatibilityTool};
 use crate::wine_cask::install::{Install, QueueCompatibilityTool};
 use crate::wine_cask::uninstall::Uninstall;
 
@@ -21,6 +21,8 @@ pub struct AppState {
     pub installed_compatibility_tools: Vec<SteamCompatibilityTool>,
     pub in_progress: Option<QueueCompatibilityTool>,
     pub task_queue: VecDeque<Task>,
+    #[serde(skip)]
+    pub available_compat_tools: Option<Vec<SteamClientCompatToolInfo>>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
@@ -29,7 +31,6 @@ pub enum RequestType {
     UpdateState,
     Install,
     Uninstall,
-    Reboot,
     Notification,
     Task,
 }
@@ -48,6 +49,7 @@ pub enum TaskType {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Request {
     pub r#type: RequestType,
+    pub available_compat_tools: Option<Vec<SteamClientCompatToolInfo>>,
     pub app_state: Option<AppState>,
     pub install: Option<Install>,
     pub uninstall: Option<Uninstall>,
@@ -89,6 +91,7 @@ impl WineCask {
         let app_state = self.app_state.lock().await;
         let response_new: Request = Request {
             r#type: RequestType::UpdateState,
+            available_compat_tools: None,
             app_state: Some(app_state.clone()),
             install: None,
             uninstall: None,
@@ -146,13 +149,6 @@ impl WineCask {
         self.broadcast_app_state(peer_map).await;
     }
 
-    pub async fn update_installed_compatibility_tools(&self, peer_map: &PeerMap) {
-        self.app_state.lock().await.installed_compatibility_tools = self.list_compatibility_tools().unwrap();
-        let installed = self.app_state.lock().await.installed_compatibility_tools.clone();
-        self.app_state.lock().await.available_flavors = self.get_flavors(installed, true).await;
-        self.broadcast_app_state(peer_map).await;
-    }
-
     pub fn list_compatibility_tools(&self) -> Option<Vec<SteamCompatibilityTool>> {
         let compat_tools = self
             .steam_util
@@ -203,6 +199,28 @@ impl WineCask {
             used_by_games: self.get_used_by_games(&compatibility_tool.display_name, &compatibility_tool.internal_name),
             github_release: None,
             requires_restart,
+        }
+    }
+
+    pub async fn process_frontend_compat_tools_update(&self, peer_map: &PeerMap, available_compat_tools: Vec<SteamClientCompatToolInfo>) {
+        let mut app_state = self.app_state.lock().await;
+        app_state.available_compat_tools = Some(available_compat_tools);
+        drop(app_state);
+        self.sync_backend_with_installed_compat_tools().await;
+        self.broadcast_app_state(peer_map).await;
+    }
+
+    pub async fn sync_backend_with_installed_compat_tools(&self) {
+        let mut app_state = self.app_state.lock().await;
+        app_state.installed_compatibility_tools = self.list_compatibility_tools().unwrap();
+
+        let available_compat_tools = app_state.available_compat_tools.clone().unwrap();
+
+        // todo: error handle this
+        let available_tools_map: HashMap<String, &SteamClientCompatToolInfo> = available_compat_tools.iter().map(|tool| (tool.str_tool_name.clone(), tool)).collect();
+
+        for tool in &mut app_state.installed_compatibility_tools {
+            tool.requires_restart = !available_tools_map.contains_key(&tool.internal_name);
         }
     }
 }

@@ -12,9 +12,6 @@ import { VFC } from "react";
 import { FaShip } from "react-icons/fa";
 
 import ManagePage from "./frontend";
-import { Request, RequestType } from "./types";
-import { log } from "./logger";
-import {RegisterForShutdownStart} from "./SteamUtil";
 
 const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
   return (
@@ -57,19 +54,6 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
 export default definePlugin((serverApi: ServerAPI) => {
   serverApi.routerHook.addRoute("/wine-cellar", () => {
     return <ManagePage />;
-  });
-
-  let shutdownHook = RegisterForShutdownStart(() => {
-    log("We are attempting to restart the backend, hold on :P");
-    const ws = new WebSocket("ws://localhost:8887");
-    ws.onopen = (): void => {
-      const response: Request = {
-        type: RequestType.Reboot,
-      };
-      ws.send(JSON.stringify(response));
-      ws.close();
-      shutdownHook!.unregister();
-    };
   });
 
   return {

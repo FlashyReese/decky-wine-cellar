@@ -1,3 +1,5 @@
+import {CompatToolInfo} from "./SteamUtil";
+
 export type GitHubRelease = {
   url: String;
   id: number;
@@ -48,6 +50,7 @@ export type Flavor = {
 
 export type Request = {
   type: RequestType;
+  available_compat_tools?: CompatToolInfo[] | null;
   notification?: string | null;
   app_state?: AppState | null;
   install?: Install | null;
@@ -103,5 +106,4 @@ export enum RequestType {
   RequestState = "RequestState",
   UpdateState = "UpdateState",
   Notification = "Notification",
-  Reboot = "Reboot",
 }

@@ -39,6 +39,7 @@ async fn main() -> Result<(), IoError> {
         installed_compatibility_tools: Vec::new(),
         in_progress: None,
         task_queue: VecDeque::new(),
+        available_compat_tools: None,
     }));
 
     let wine_cask = WineCask {
@@ -183,6 +184,8 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
     if let Ok(request) = serde_json::from_str::<Request>(msg) {
         match request.r#type {
             RequestType::RequestState => {
+                // Assumes available_compat_tools is Some
+                wine_cask.process_frontend_compat_tools_update(peer_map, request.available_compat_tools.unwrap()).await;
                 wine_cask.update_used_by_games(peer_map).await;
             }
             RequestType::Install => {
@@ -193,9 +196,6 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
             }
             RequestType::Uninstall => {
                 wine_cask.uninstall_compatibility_tool(request.uninstall.unwrap().steam_compatibility_tool, peer_map).await;
-            }
-            RequestType::Reboot => {
-                wine_cask.update_installed_compatibility_tools(peer_map).await;
             }
             _ => {}
         }

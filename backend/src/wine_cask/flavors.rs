@@ -48,6 +48,15 @@ pub struct SteamCompatibilityTool {
     //pub virtual_original: String, // Display name or Internal name or name?
 }
 
+// SteamClient.Apps.GetAvailableCompatTools()
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SteamClientCompatToolInfo {
+    #[serde(rename = "strToolName")]
+    pub str_tool_name: String,
+    #[serde(rename = "strDisplayName")]
+    pub str_display_name: String,
+}
+
 impl WineCask {
     pub async fn get_flavors(&self, installed_compatibility_tools: Vec<SteamCompatibilityTool>, renew_cache: bool) -> Vec<Flavor> {
         let mut flavors = Vec::new();

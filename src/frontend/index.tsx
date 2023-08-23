@@ -5,8 +5,9 @@ import { AppState, Request, RequestType } from "../types";
 import { log } from "../logger";
 import { v4 as uuidv4 } from "uuid";
 import FlavorTab from "./CompatibilityToolFlavorTab";
-import VirtualCompatibilityTools from "./VirtualCompatibilityTools";
 import ManagerTab from "./Manager";
+import {GetAvailableCompatTools} from "../SteamUtil";
+import About from "./About";
 
 export default function ManagePage() {
   const [appState, setAppState] = useState<AppState | null>(null);
@@ -21,21 +22,24 @@ export default function ManagePage() {
 
     socket.onopen = async () => {
       log("WebSocket connection established. Unique Identifier:", uniqueId); // Log the unique identifier on connection open
+
+      const tools = await GetAvailableCompatTools(0); // What app id should we use here?
+
       const response: Request = {
         type: RequestType.RequestState,
+        available_compat_tools: tools,
       };
 
       socket.send(JSON.stringify(response));
     };
 
     socket.onmessage = async (event) => {
-      log("Received message from server:", event.data);
+      //log("Received message from server:", event.data);
       const response: Request = JSON.parse(event.data);
       if (response.type == RequestType.UpdateState) {
         if (response.app_state != null) {
           setAppState(response.app_state);
-          console.log(response.app_state);
-          //log("Received app state update");
+          log("Received app state update");
         }
       }
     };
@@ -77,12 +81,19 @@ export default function ManagePage() {
         route: "/wine-cellar/" + flavor.flavor,
       });
     });
+  } else {
+    // Loading page
+    pages.push({
+      title: "Loading...",
+      content: <div>Loading...</div>,
+      route: "/wine-cellar/loading",
+    });
   }
 
   pages.push({
-    title: "Virtual",
-    content: <VirtualCompatibilityTools />,
-    route: "/wine-cellar/virtual",
+    title: "About",
+    content: <About/>,
+    route: "/wine-cellar/about"
   });
 
   return <SidebarNavigation title="Wine Cellar" showTitle pages={pages} />;
