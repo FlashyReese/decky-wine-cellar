@@ -188,11 +188,16 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
                 wine_cask.process_frontend_compat_tools_update(peer_map, request.available_compat_tools.unwrap()).await;
                 wine_cask.update_used_by_games(peer_map).await;
             }
-            RequestType::Install => {
-                wine_cask.add_to_task_queue(Task {
-                    r#type: TaskType::InstallCompatibilityTool,
-                    install: Some(request.install.unwrap()),
-                }, peer_map).await;
+            RequestType::Task => {
+                if let Some(task) = request.task {
+                    if task.r#type == TaskType::InstallCompatibilityTool {
+                        wine_cask.add_to_task_queue(task, peer_map).await;
+                    } else if task.r#type == TaskType::CancelCompatibilityToolInstall {
+                        wine_cask.remove_or_cancel_from_task_queue(task, peer_map).await;
+                    }
+                } else {
+                    wine_cask.broadcast_notification(peer_map, "Something went wrong with the task request").await;
+                }
             }
             RequestType::Uninstall => {
                 wine_cask.uninstall_compatibility_tool(request.uninstall.unwrap().steam_compatibility_tool, peer_map).await;

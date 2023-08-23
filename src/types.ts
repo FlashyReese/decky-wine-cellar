@@ -40,6 +40,7 @@ export type Task = {
 
 export enum TaskType {
   InstallCompatibilityTool = "InstallCompatibilityTool",
+  CancelCompatibilityToolInstall = "CancelCompatibilityToolInstall",
 }
 
 export type Flavor = {
@@ -50,6 +51,7 @@ export type Flavor = {
 
 export type Request = {
   type: RequestType;
+  task?: Task | null;
   available_compat_tools?: CompatToolInfo[] | null;
   notification?: string | null;
   app_state?: AppState | null;
@@ -101,7 +103,7 @@ export enum QueueCompatibilityToolState {
 }
 
 export enum RequestType {
-  Install = "Install",
+  Task = "Task",
   Uninstall = "Uninstall",
   RequestState = "RequestState",
   UpdateState = "UpdateState",

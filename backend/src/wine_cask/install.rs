@@ -2,6 +2,7 @@ use std::env;
 use std::fs::create_dir_all;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use flate2::bufread::GzDecoder;
 use serde::{Deserialize, Serialize};
 use xz2::bufread::XzDecoder;
@@ -54,7 +55,6 @@ impl WineCask {
                 self.app_state.lock().await.in_progress = Some(queue_compatibility_tool.clone());
                 self.broadcast_app_state(peer_map).await;
             }
-
             let client = reqwest::Client::new();
             let response_wrapped = client.get(&queue_compatibility_tool.url).send().await;
             let response = response_wrapped.unwrap();
@@ -62,10 +62,33 @@ impl WineCask {
             let mut downloaded_bytes = Vec::new();
             let mut downloaded_size = 0;
             let mut body = response.bytes_stream();
-            while let Some(chunk_result) = body.next().await { // fixme: we need to timeout when internet connection is lost while downloading...
+
+            const MINIMUM_SPEED: f64 = 50.0; // 50 bytes per second
+
+            let start_time = Instant::now();
+            let start_size = downloaded_size;
+
+            while let Some(chunk_result) = body.next().await {
                 let chunk = chunk_result.unwrap();
                 downloaded_bytes.extend_from_slice(&chunk);
                 downloaded_size += chunk.len() as u64;
+
+                let elapsed_time = start_time.elapsed().as_secs();
+                let downloaded_size_diff = downloaded_size - start_size;
+                let speed = downloaded_size_diff as f64 / elapsed_time as f64;
+
+                if speed < MINIMUM_SPEED {
+                    // If the speed is too low, we assume that the download has stalled
+                    // and we cancel the download.
+                    self.app_state.lock().await.in_progress = None;
+                    self.broadcast_app_state(peer_map).await;
+                    self.broadcast_notification(peer_map, "Download stalled less than 50 bytes, cancelling...").await;
+                    return; // We stop the function here
+                } else if self.app_state.lock().await.in_progress.clone().unwrap().state == QueueCompatibilityToolState::Cancelling {
+                    self.app_state.lock().await.in_progress = None;
+                    self.broadcast_app_state(peer_map).await;
+                    return; // We stop the function here
+                }
 
                 let progress = ((downloaded_size as f64 / total_size as f64) * 100.0) as u8;
                 if queue_compatibility_tool.progress != progress {

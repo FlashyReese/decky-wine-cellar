@@ -1,15 +1,15 @@
 import {
-    ConfirmModal,
-    DialogBody,
-    DialogButton,
-    DialogControlsSection,
-    DialogControlsSectionHeader,
-    Focusable,
-    Menu,
-    MenuItem,
-    ProgressBarWithInfo,
-    showContextMenu,
-    showModal,
+  ConfirmModal,
+  DialogBody,
+  DialogButton,
+  DialogControlsSection,
+  DialogControlsSectionHeader,
+  Focusable,
+  Menu,
+  MenuItem,
+  ProgressBarWithInfo,
+  showContextMenu,
+  showModal,
 } from "decky-frontend-lib";
 import { FaEllipsisH } from "react-icons/fa";
 import {
@@ -23,32 +23,38 @@ import {
   TaskType,
 } from "../types";
 import { error } from "../logger";
-import {Markdown} from "../components/Markdown";
+import { Markdown } from "../components/Markdown";
 
-function ChangeLogModal({ release, closeModal }: { release: GitHubRelease; closeModal?: () => {} }) {
+function ChangeLogModal({
+  release,
+  closeModal,
+}: {
+  release: GitHubRelease;
+  closeModal?: () => {};
+}) {
   return (
-      <Focusable onCancelButton={closeModal}>
-          <Focusable
-              onActivate={() => {}}
-              style={{
-                  marginTop: '40px',
-                  height: 'calc( 100% - 40px )',
-                  overflowY: 'scroll',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  margin: '40px',
-              }}
-          >
-              <div>
-                  <h1>{release.name}</h1>
-                  {release.body ? (
-                      <Markdown>{`${release.body}`}</Markdown>
-                  ) : (
-                      'no patch notes for this version'
-                  )}
-              </div>
-          </Focusable>
+    <Focusable onCancelButton={closeModal}>
+      <Focusable
+        onActivate={() => {}}
+        style={{
+          marginTop: "40px",
+          height: "calc( 100% - 40px )",
+          overflowY: "scroll",
+          display: "flex",
+          justifyContent: "center",
+          margin: "40px",
+        }}
+      >
+        <div>
+          <h1>{release.name}</h1>
+          {release.body ? (
+            <Markdown>{`${release.body}`}</Markdown>
+          ) : (
+            "no patch notes for this version"
+          )}
+        </div>
       </Focusable>
+    </Focusable>
   );
 }
 
@@ -64,10 +70,13 @@ export default function FlavorTab({
   const handleInstall = (release: GitHubRelease) => {
     if (getSocket && getSocket.readyState === WebSocket.OPEN) {
       const response: Request = {
-        type: RequestType.Install,
-        install: {
-          flavor: getFlavor.flavor,
-          release: release,
+        type: RequestType.Task,
+        task: {
+          type: TaskType.InstallCompatibilityTool,
+          install: {
+            flavor: getFlavor.flavor,
+            release: release,
+          },
         },
       };
       getSocket.send(JSON.stringify(response));
@@ -83,6 +92,24 @@ export default function FlavorTab({
         uninstall: {
           flavor: getFlavor.flavor,
           steam_compatibility_tool: release, //fixme: we should pass back a directory instead or uuid the backend to use it to find the directory
+        },
+      };
+      getSocket.send(JSON.stringify(response));
+    } else {
+      error("WebSocket not alive...");
+    }
+  };
+
+  const handleCancel = (release: GitHubRelease) => {
+    if (getSocket && getSocket.readyState === WebSocket.OPEN) {
+      const response: Request = {
+        type: RequestType.Task,
+        task: {
+          type: TaskType.CancelCompatibilityToolInstall,
+          install: {
+            flavor: getFlavor.flavor,
+            release: release,
+          },
         },
       };
       getSocket.send(JSON.stringify(response));
@@ -108,9 +135,7 @@ export default function FlavorTab({
     );
 
   const handleViewChangeLog = (release: GitHubRelease) =>
-      showModal(
-          <ChangeLogModal release={release}/>
-      );
+    showModal(<ChangeLogModal release={release} />);
 
   return (
     <DialogBody>
@@ -190,9 +215,19 @@ export default function FlavorTab({
           </DialogControlsSectionHeader>
           <ul>
             {getFlavor.not_installed.map((release) => {
-              const isQueued = getAppState.in_progress !== null;
-              const isItemQueued =
-                isQueued && getAppState.in_progress?.name === release.tag_name;
+              const isQueued = getAppState.task_queue
+                  .filter(
+                      (task) =>
+                          task.type == TaskType.InstallCompatibilityTool,
+                  )
+                  .map((task) => task.install)
+                  .filter(
+                      (install) =>
+                          install != null && install.release.url == release.url,
+                  ).length == 1
+              const isInProgress = getAppState.in_progress !== null;
+              const isItemInProgress =
+                isInProgress && getAppState.in_progress?.name === release.tag_name;
               return (
                 <li
                   style={{
@@ -203,19 +238,10 @@ export default function FlavorTab({
                   }}
                 >
                   <span>
-                    {release.tag_name}{" "}
-                    {getAppState.task_queue
-                      .filter(
-                        (task) =>
-                          task.type == TaskType.InstallCompatibilityTool,
-                      )
-                      .map((task) => task.install)
-                      .filter(
-                        (install) =>
-                          install != null && install.release.url == release.url,
-                      ).length == 1 && "(In Queue)"}
+                    {release.tag_name}
+                    {isQueued && " (In Queue)"}
                   </span>
-                  {isItemQueued && (
+                  {isItemInProgress && (
                     <div
                       style={{
                         marginLeft: "auto",
@@ -253,7 +279,7 @@ export default function FlavorTab({
                         showContextMenu(
                           <Menu label="Runner Actions">
                             <MenuItem
-                              disabled={isItemQueued}
+                              disabled={(isItemInProgress || isQueued) }
                               onSelected={() => {}}
                               onClick={() => {
                                 handleInstall(release);
@@ -261,10 +287,15 @@ export default function FlavorTab({
                             >
                               Install
                             </MenuItem>
+                            {(isItemInProgress || isQueued) && (
+                              <MenuItem onClick={() => {
+                                handleCancel(release);
+                              }}>Cancel from Installation</MenuItem>
+                            )}
                             <MenuItem
-                                onClick={() => {
-                                  handleViewChangeLog(release);
-                                }}
+                              onClick={() => {
+                                handleViewChangeLog(release);
+                              }}
                             >
                               View Change Log
                             </MenuItem>

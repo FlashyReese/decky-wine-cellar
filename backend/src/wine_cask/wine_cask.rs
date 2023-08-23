@@ -7,7 +7,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::PeerMap;
 use crate::steam_util::{CompatibilityTool, SteamUtil};
 use crate::wine_cask::flavors::{Flavor, SteamClientCompatToolInfo, SteamCompatibilityTool};
-use crate::wine_cask::install::{Install, QueueCompatibilityTool};
+use crate::wine_cask::install::{Install, QueueCompatibilityTool, QueueCompatibilityToolState};
 use crate::wine_cask::uninstall::Uninstall;
 
 pub struct WineCask {
@@ -25,7 +25,7 @@ pub struct AppState {
     pub available_compat_tools: Option<Vec<SteamClientCompatToolInfo>>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
 pub enum RequestType {
     RequestState,
     UpdateState,
@@ -44,14 +44,16 @@ pub struct Task {
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum TaskType {
     InstallCompatibilityTool,
+    CancelCompatibilityToolInstall,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Request {
     pub r#type: RequestType,
+    pub task: Option<Task>,
+    pub notification: Option<String>,
     pub available_compat_tools: Option<Vec<SteamClientCompatToolInfo>>,
     pub app_state: Option<AppState>,
-    pub install: Option<Install>,
     pub uninstall: Option<Uninstall>,
 }
 
@@ -73,17 +75,24 @@ impl WineCask {
         self.broadcast_app_state(peer_map).await;
     }
 
-    pub async fn remove_from_task_queue(&self, install: Install) {
+    pub async fn remove_or_cancel_from_task_queue(&self, task: Task, peer_map: &PeerMap) {
         let mut app_state = self.app_state.lock().await;
         if let Some(position) = app_state
             .task_queue
             .iter()
-            .position(|x| x.install.clone().unwrap().release.url == install.release.url)
+            .position(|x| x.install.clone().unwrap().release.url == task.install.clone().unwrap().release.url)
         {
             app_state.task_queue.remove(position);
-            //Todo: Notify removed from queue
+            drop(app_state);
+            self.broadcast_app_state(peer_map).await;
+            self.broadcast_notification(peer_map, "Canceled compatibility tool install").await;
         } else {
-            //Todo: Notify none found
+            if let Some(in_progress) = &mut app_state.in_progress {
+                in_progress.state = QueueCompatibilityToolState::Cancelling;
+                self.broadcast_notification(peer_map, "Cancelling compatibility tool install").await;
+            } else {
+                self.broadcast_notification(peer_map, "Couldn't find compatibility tool in queue").await;
+            }
         }
     }
 
@@ -91,16 +100,35 @@ impl WineCask {
         let app_state = self.app_state.lock().await;
         let response_new: Request = Request {
             r#type: RequestType::UpdateState,
+            task: None,
+            notification: None,
             available_compat_tools: None,
             app_state: Some(app_state.clone()),
-            install: None,
             uninstall: None,
         };
-        let update = serde_json::to_string(&response_new).unwrap();
+        drop(app_state);
+        self.broadcast_message(peer_map, &response_new).await;
+    }
+
+    pub async fn broadcast_notification(&self, peer_map: &PeerMap, message: &str) {
+        let response_new: Request = Request {
+            r#type: RequestType::Notification,
+            task: None,
+            notification: Some(message.to_string()),
+            available_compat_tools: None,
+            app_state: None,
+            uninstall: None,
+        };
+        self.broadcast_message(peer_map, &response_new).await;
+    }
+
+    async fn broadcast_message(&self, peer_map: &PeerMap, response: &Request) {
+        let update = serde_json::to_string(response).unwrap();
         let message = Message::text(&update);
         for recp in peer_map.lock().await.values() {
             match recp.unbounded_send(message.clone()) {
                 Ok(_) => {
+                    info!("Type: {:?}", response.r#type);
                     debug!("Websocket message sent: {}", &update);
                 }
                 Err(e) => {

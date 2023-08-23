@@ -12,6 +12,7 @@ import { VFC } from "react";
 import { FaShip } from "react-icons/fa";
 
 import ManagePage from "./frontend";
+import {forceCloseToastsWebSocket, setupToasts} from "./toasts";
 
 const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
   return (
@@ -52,6 +53,7 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
 };
 
 export default definePlugin((serverApi: ServerAPI) => {
+  setupToasts(serverApi);
   serverApi.routerHook.addRoute("/wine-cellar", () => {
     return <ManagePage />;
   });
@@ -61,6 +63,7 @@ export default definePlugin((serverApi: ServerAPI) => {
     content: <Content serverAPI={serverApi} />,
     icon: <FaShip />,
     onDismount() {
+      forceCloseToastsWebSocket();
       serverApi.routerHook.removeRoute("/wine-cellar");
     },
   };
