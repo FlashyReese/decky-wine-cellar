@@ -43,6 +43,7 @@
     "decky-frontend-lib": "^3.22.0",
     "react-icons": "^4.10.1",
     "react-markdown": "^8.0.7",
+    "react-qr-code": "^2.0.12",
     "remark-gfm": "^3.0.1",
     "uuid": "^9.0.0"
   },

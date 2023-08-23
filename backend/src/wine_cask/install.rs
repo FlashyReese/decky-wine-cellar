@@ -46,6 +46,7 @@ pub enum CompressionType {
 }
 
 impl WineCask {
+    // Why is this task queue here? Well because steam deck will die if someone tries to queue up 50 installs at once.
     pub async fn install_compatibility_tool(&self, install: Install, peer_map: &PeerMap) {
         if let Some(mut queue_compatibility_tool) = look_for_compressed_archive(&install) {
             // Mark as downloading...
@@ -77,7 +78,7 @@ impl WineCask {
                 let downloaded_size_diff = downloaded_size - start_size;
                 let speed = downloaded_size_diff as f64 / elapsed_time as f64;
 
-                if speed < MINIMUM_SPEED {
+                if speed < MINIMUM_SPEED { // fixme: this still doesn't work
                     // If the speed is too low, we assume that the download has stalled
                     // and we cancel the download.
                     self.app_state.lock().await.in_progress = None;
@@ -195,6 +196,7 @@ impl WineCask {
 
             // Mark as completed
             {
+                self.broadcast_notification(peer_map, format!("Installed {}", queue_compatibility_tool.name).as_str()).await;
                 self.app_state.lock().await.in_progress = None;
                 self.broadcast_app_state(peer_map).await;
             }

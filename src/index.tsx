@@ -1,7 +1,6 @@
 import {
   ButtonItem,
   definePlugin,
-  Navigation,
   PanelSection,
   PanelSectionRow,
   Router,
@@ -26,26 +25,6 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
           }}
         >
           Manage
-        </ButtonItem>
-        <ButtonItem
-          layout="below"
-          onClick={() => {
-            Navigation.CloseSideMenus();
-            Navigation.NavigateToExternalWeb(
-              "https://github.com/FlashyReese/decky-wine-cellar/issues",
-            );
-          }}
-        >
-          Report an issue
-        </ButtonItem>
-        <ButtonItem
-          layout="below"
-          onClick={() => {
-            Navigation.CloseSideMenus();
-            Navigation.NavigateToExternalWeb("https://ko-fi.com/flashyreese");
-          }}
-        >
-          Support the project!
         </ButtonItem>
       </PanelSectionRow>
     </PanelSection>

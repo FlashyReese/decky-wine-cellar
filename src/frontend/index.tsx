@@ -84,9 +84,9 @@ export default function ManagePage() {
   } else {
     // Loading page
     pages.push({
-      title: "Loading...",
-      content: <div>Loading...</div>,
-      route: "/wine-cellar/loading",
+      title: "Preparing...",
+      content: <div>Hang tight! We're preparing your Wine Cellar experience. If this is taking longer than expected, the backend might be having a siesta.</div>,
+      route: "/wine-cellar/preparing",
     });
   }
 

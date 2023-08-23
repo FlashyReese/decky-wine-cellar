@@ -17,7 +17,7 @@ impl WineCask {
         let directory_path = PathBuf::from(&steam_compatibility_tool.path);
         if let Err(e) = recursive_delete_dir_entry(&directory_path) {
             error!("Error deleting directory: {}", e);
-            // todo: send a toast notification to the client
+            self.broadcast_notification(peer_map, "Something went wrong with the uninstallation").await;
             return;
         }
 

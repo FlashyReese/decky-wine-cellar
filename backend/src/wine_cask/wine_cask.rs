@@ -138,10 +138,6 @@ impl WineCask {
         }
     }
 
-
-    // todo: We need a hook in the frontend when user sets a compatibility tool to call this function
-    // our current workaround is just update it every time we get a request for the app state; which should be fine for the most part.
-    // it is a problem if we choose to just use a single websocket client for handling the frontend + notifications
     fn get_used_by_games(&self, display_name: &str, internal_name: &str) -> Vec<String> {
         let compat_tools_mapping = self
             .steam_util
