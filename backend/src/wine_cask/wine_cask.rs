@@ -171,6 +171,7 @@ impl WineCask {
                 display_name: compat_tool.display_name.to_string(),
                 internal_name: compat_tool.internal_name.to_string(),
                 used_by_games,
+                github_release: None,
                 requires_restart: false,
                 //r#virtual: metadata.r#virtual,
                 //virtual_original: metadata.virtual_original,
@@ -200,6 +201,7 @@ impl WineCask {
             display_name: compatibility_tool.display_name.to_string(),
             internal_name: compatibility_tool.internal_name.to_string(),
             used_by_games: self.get_used_by_games(&compatibility_tool.display_name, &compatibility_tool.internal_name),
+            github_release: None,
             requires_restart,
         }
     }

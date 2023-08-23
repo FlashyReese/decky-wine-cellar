@@ -43,6 +43,7 @@ pub struct SteamCompatibilityTool {
     pub internal_name: String,
     pub used_by_games: Vec<String>,
     pub requires_restart: bool,
+    pub github_release: Option<Release>
     //pub r#virtual: bool,
     //pub virtual_original: String, // Display name or Internal name or name?
 }
@@ -165,7 +166,13 @@ impl WineCask {
             if duration.as_secs() < SECONDS_IN_A_DAY {
                 let string = fs::read_to_string(&cache_file).ok()?;
                 let github_releases: Vec<Release> = serde_json::from_str(&string).ok()?;
-                return Some(github_releases);
+
+                // Check if parsing failed but data exists (cache is corrupted)
+                if github_releases.is_empty() {
+                    info!("Cached data is possibly corrupted or possibly missing information from outdated version. Renewing cache...");
+                } else {
+                    return Some(github_releases);
+                }
             } else {
                 info!("Cache file is older than 1 day. Fetching new releases.");
             }
@@ -174,6 +181,7 @@ impl WineCask {
         let github_releases = match github_util::list_all_releases(owner, repository).await {
             Ok(releases) => {
                 let json = serde_json::to_string(&releases).ok()?;
+                // todo: we should not overwrite the cache if we hit the rate limit and get an invalid response
                 fs::write(&cache_file, json).ok()?;
                 releases
             }

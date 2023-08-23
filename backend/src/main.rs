@@ -141,9 +141,9 @@ fn configure_logger() -> Result<(), IoError> {
                 record.args()
             )
         })
-        .filter(None, LevelFilter::Info)
-        .target(env_logger::Target::Pipe(Box::new(target))) //todo: pipe to stdout and file
-        //.target(env_logger::Target::Stdout)
+        //.filter(None, LevelFilter::Info)
+        //.target(env_logger::Target::Pipe(Box::new(target))) //todo: pipe to stdout and file
+        .target(env_logger::Target::Stdout)
         .init();
     Ok(())
 }

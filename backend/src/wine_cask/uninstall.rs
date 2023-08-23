@@ -39,6 +39,7 @@ impl WineCask {
 
         let installed = app_state.installed_compatibility_tools.clone();
         app_state.available_flavors = self.get_flavors(installed, false).await;
+        drop(app_state);
         self.broadcast_app_state(peer_map).await;
     }
 }

@@ -72,6 +72,7 @@ export type SteamCompatibilityTool = {
   display_name: string;
   used_by_games: string[];
   requires_restart: boolean;
+  github_release?: GitHubRelease;
 };
 
 export type QueueCompatibilityTool = {

@@ -14,6 +14,7 @@ import { FaShip } from "react-icons/fa";
 import ManagePage from "./frontend";
 import { Request, RequestType } from "./types";
 import { log } from "./logger";
+import {RegisterForShutdownStart} from "./SteamUtil";
 
 const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
   return (
@@ -58,7 +59,7 @@ export default definePlugin((serverApi: ServerAPI) => {
     return <ManagePage />;
   });
 
-  SteamClient.User.RegisterForShutdownStart(() => {
+  let shutdownHook = RegisterForShutdownStart(() => {
     log("We are attempting to restart the backend, hold on :P");
     const ws = new WebSocket("ws://localhost:8887");
     ws.onopen = (): void => {
@@ -67,6 +68,7 @@ export default definePlugin((serverApi: ServerAPI) => {
       };
       ws.send(JSON.stringify(response));
       ws.close();
+      shutdownHook!.unregister();
     };
   });
 

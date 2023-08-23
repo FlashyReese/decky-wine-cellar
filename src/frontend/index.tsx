@@ -24,6 +24,7 @@ export default function ManagePage() {
       const response: Request = {
         type: RequestType.RequestState,
       };
+
       socket.send(JSON.stringify(response));
     };
 
