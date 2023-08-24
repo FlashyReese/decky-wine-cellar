@@ -1,15 +1,15 @@
-use std::{fs, io};
+use crate::wine_cask::app::{TaskType, WineCask};
+use crate::PeerMap;
 use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::io::Write;
-use crate::PeerMap;
-use crate::wine_cask::wine_cask::{TaskType, WineCask};
+use std::{fs, io};
 
+pub mod app;
 pub mod flavors;
 pub mod install;
 pub mod uninstall;
-pub mod wine_cask;
 pub mod r#virtual;
 
 pub fn generate_compatibility_tool_vdf(path: PathBuf, internal_name: &str, display_name: &str) {
@@ -30,7 +30,8 @@ pub fn generate_compatibility_tool_vdf(path: PathBuf, internal_name: &str, displ
               }}
             }}"#,
         internal_name, display_name
-    ).expect("Failed to write to file");
+    )
+    .expect("Failed to write to file");
 }
 
 fn copy_dir(source: &Path, destination: &Path) -> io::Result<()> {
@@ -70,6 +71,7 @@ fn recursive_delete_dir_entry(entry_path: &Path) -> std::io::Result<()> {
 }
 
 pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
+    wine_cask.check_for_flavor_updates(&peer_map, false).await;
     loop {
         match wine_cask.task_queue_pop_front().await {
             Some(task) => {

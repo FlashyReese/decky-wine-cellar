@@ -3,7 +3,7 @@
   "author": "FlashyReese",
   "flags": ["debug", "_root"],
   "publish": {
-    "tags": ["template", "root"],
+    "tags": ["proton"],
     "description": "A decky plugin to manage Steam Play compatibility tools",
     "image": "https://opengraph.githubassets.com/1/SteamDeckHomebrew/PluginLoader"
   }

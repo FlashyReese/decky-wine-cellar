@@ -73,14 +73,10 @@ impl SteamUtil {
 
     pub fn find() -> Result<Self, SteamUtilError> {
         match SteamUtil::find_steam_directory() {
-            Ok(steam_home) => {
-                Ok(Self {
-                    steam_path: steam_home,
-                })
-            }
-            Err(err) => {
-                Err(err)
-            }
+            Ok(steam_home) => Ok(Self {
+                steam_path: steam_home,
+            }),
+            Err(err) => Err(err),
         }
     }
 
@@ -262,7 +258,11 @@ impl SteamUtil {
             return Err(SteamUtilError::SteamAppsDirectoryNotFound);
         }
 
-        let library_folders_vdf_file = self.steam_path.join("root").join("steamapps").join("libraryfolders.vdf");
+        let library_folders_vdf_file = self
+            .steam_path
+            .join("root")
+            .join("steamapps")
+            .join("libraryfolders.vdf");
 
         if !library_folders_vdf_file.exists() {
             return Err(SteamUtilError::LibraryFoldersVdfNotFound);
@@ -278,7 +278,7 @@ impl SteamUtil {
 
         let mut library_folders: Vec<PathBuf> = Vec::new();
 
-        for (_key, value) in app_state_obj {
+        for value in app_state_obj.values() {
             let key_obj = value.get(0).unwrap().get_obj().unwrap();
             let path = key_obj
                 .get("path")
@@ -297,22 +297,28 @@ impl SteamUtil {
     }
 
     /// Lists the installed games across all library folders.
-    pub fn list_installed_games(&self) -> Result<Vec<SteamApp>, SteamUtilError> { // todo: problem is this function can also return partial results because one library folder might be broken but the others might still work properly
+    pub fn list_installed_games(&self) -> Result<Vec<SteamApp>, SteamUtilError> {
+        // todo: problem is this function can also return partial results because one library folder might be broken but the others might still work properly
         let mut apps: Vec<SteamApp> = Vec::new();
         match self.list_library_folders() {
             Ok(library_folders) => {
                 for library_folder in library_folders {
                     let library_folder = library_folder.join("steamapps");
                     if !library_folder.exists() {
-                        error!("Library folder {} does not exist", library_folder.to_str().unwrap());
+                        error!(
+                            "Library folder {} does not exist",
+                            library_folder.to_str().unwrap()
+                        );
                         continue;
                     }
                     match &mut self.find_installed_games(library_folder.clone()) {
-                        Ok(steam_apps) => {
-                            apps.append(steam_apps)
-                        }
+                        Ok(steam_apps) => apps.append(steam_apps),
                         Err(err) => {
-                            error!("Failed to find installed games in library folder {}: {}", &library_folder.to_str().unwrap(), err);
+                            error!(
+                                "Failed to find installed games in library folder {}: {}",
+                                &library_folder.to_str().unwrap(),
+                                err
+                            );
                             return Err(err.clone());
                         }
                     }
@@ -326,8 +332,11 @@ impl SteamUtil {
         Ok(apps)
     }
 
-    pub fn find_installed_games(&self, steam_apps_directory: PathBuf) -> Result<Vec<SteamApp>, SteamUtilError> {
-        let apps: Vec<SteamApp> = fs::read_dir(&steam_apps_directory)
+    pub fn find_installed_games(
+        &self,
+        steam_apps_directory: PathBuf,
+    ) -> Result<Vec<SteamApp>, SteamUtilError> {
+        let apps: Vec<SteamApp> = fs::read_dir(steam_apps_directory)
             .map_err(|_err| SteamUtilError::SteamAppsDirectoryNotFound)
             .unwrap()
             .filter_map(Result::ok)
@@ -433,7 +442,7 @@ mod tests {
               }
             }"#,
         )
-            .expect("Failed to write compatibility tool VDF file");
+        .expect("Failed to write compatibility tool VDF file");
 
         let compat_tool_2_dir = compatibility_tools_dir.join("compat_tool_2");
         fs::create_dir_all(&compat_tool_2_dir)
@@ -455,7 +464,7 @@ mod tests {
               }
             }"#,
         )
-            .expect("Failed to write compatibility tool VDF file");
+        .expect("Failed to write compatibility tool VDF file");
 
         // Create Steam config file
         fs::write(
@@ -489,12 +498,12 @@ mod tests {
             }
             "#,
         )
-            .expect("Failed to write Steam config file");
+        .expect("Failed to write Steam config file");
 
         // Create library folders VDF file
         let library_folders_vdf_file = root_dir.join("steamapps").join("libraryfolders.vdf");
         fs::write(
-            &library_folders_vdf_file,
+            library_folders_vdf_file,
             format!(
                 r#""libraryfolders"
                 {{
@@ -510,10 +519,10 @@ mod tests {
                     }}
                 }}
                 "#,
-                root_dir.as_path().display()  // Path to the temporary directory within libraryfolders
+                root_dir.as_path().display() // Path to the temporary directory within libraryfolders
             ),
         )
-            .expect("Failed to write library folders VDF file");
+        .expect("Failed to write library folders VDF file");
 
         // Create app manifest files
         let app_manifest_1 = steamapps_dir.join("appmanifest_730.acf");
@@ -526,7 +535,7 @@ mod tests {
             }
             "#,
         )
-            .expect("Failed to write app manifest file");
+        .expect("Failed to write app manifest file");
 
         let app_manifest_2 = steamapps_dir.join("appmanifest_1145360.acf");
         fs::write(
@@ -538,7 +547,7 @@ mod tests {
             }
             "#,
         )
-            .expect("Failed to write app manifest file");
+        .expect("Failed to write app manifest file");
 
         steam_dir
     }

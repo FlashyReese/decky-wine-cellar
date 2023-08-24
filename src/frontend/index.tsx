@@ -2,12 +2,12 @@ import { SidebarNavigation, SidebarNavigationPage } from "decky-frontend-lib";
 
 import { useEffect, useState } from "react";
 import { AppState, Request, RequestType } from "../types";
-import { log } from "../logger";
+import { log } from "../utils/logger";
 import { v4 as uuidv4 } from "uuid";
-import FlavorTab from "./CompatibilityToolFlavorTab";
-import ManagerTab from "./Manager";
-import {GetAvailableCompatTools} from "../SteamUtil";
-import About from "./About";
+import FlavorTab from "./flavorTab";
+import ManagerTab from "./manager";
+import {GetAvailableCompatTools} from "../utils/steamUtils";
+import About from "./about";
 
 export default function ManagePage() {
   const [appState, setAppState] = useState<AppState | null>(null);
@@ -63,7 +63,7 @@ export default function ManagePage() {
     // Regular dashboard
     pages.push({
       title: "Dashboard",
-      content: <ManagerTab getAppState={appState} getSocket={socket}/>,
+      content: <ManagerTab appState={appState} socket={socket}/>,
       route: "/wine-cellar/dashboard",
     });
 
@@ -73,13 +73,21 @@ export default function ManagePage() {
         title: flavor.flavor,
         content: (
           <FlavorTab
-            getAppState={appState}
-            getFlavor={flavor}
-            getSocket={socket}
+            appState={appState}
+            flavor={flavor}
+            socket={socket}
           />
         ),
         route: "/wine-cellar/" + flavor.flavor,
       });
+    });
+
+
+    // About page
+    pages.push({
+      title: "About",
+      content: <About appState={appState} socket={socket}/>,
+      route: "/wine-cellar/about"
     });
   } else {
     // Loading page
@@ -89,12 +97,6 @@ export default function ManagePage() {
       route: "/wine-cellar/preparing",
     });
   }
-
-  pages.push({
-    title: "About",
-    content: <About/>,
-    route: "/wine-cellar/about"
-  });
 
   return <SidebarNavigation title="Wine Cellar" showTitle pages={pages} />;
 }

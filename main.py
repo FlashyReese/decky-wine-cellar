@@ -3,7 +3,7 @@ import subprocess
 import asyncio
 import os
 import logging
-
+from settings import SettingsManager  # type: ignore
 import decky_plugin
 
 HOME_DIR = str(pathlib.Path(os.getcwd()).parent.parent.resolve())
@@ -16,7 +16,11 @@ logging.basicConfig(filename=decky_plugin.DECKY_PLUGIN_LOG,
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
-logging.info(f"Wine Cellar main.py https://github.com/FlashyReese/decky-wine-cellar")
+logger.info(f"Wine Cellar main.py https://github.com/FlashyReese/decky-wine-cellar")
+
+logger.info('[backend] Settings path: {}'.format(decky_plugin.DECKY_PLUGIN_SETTINGS_DIR))
+settings = SettingsManager(name="settings", settings_directory=decky_plugin.DECKY_PLUGIN_SETTINGS_DIR)
+settings.read()
 
 
 class Plugin:
@@ -24,8 +28,6 @@ class Plugin:
 
     # Asyncio-compatible long-running code, executed in a task when the plugin is loaded
     async def _main(self):
-        # startup with my_env
-        os.environ["DECKY_PLUGIN_LOG"] = decky_plugin.DECKY_PLUGIN_LOG
         logger.info("Starting Wine Cask (the Wine Cellar backend)...")
         self.backend_proc = subprocess.Popen([PARENT_DIR + "/bin/backend"])
         while True:
@@ -37,3 +39,25 @@ class Plugin:
             logger.info("Killing Wine Cask (the Wine Cellar backend)...")
             self.backend_proc.kill()
         pass
+
+    async def restart_backend(self):
+        if self.backend_proc is not None:
+            logger.info("Killing Wine Cask (the Wine Cellar backend)...")
+            self.backend_proc.kill()
+        self.backend_proc = subprocess.Popen([PARENT_DIR + "/bin/backend"])
+
+    async def settings_read(self):
+        logger.info('Reading settings')
+        return settings.read()
+
+    async def settings_commit(self):
+        logger.info('Saving settings')
+        return settings.commit()
+
+    async def settings_getSetting(self, key: str, defaults):
+        logger.info('Get {}'.format(key))
+        return settings.getSetting(key, defaults)
+
+    async def settings_setSetting(self, key: str, value):
+        logger.info('Set {}: {}'.format(key, value))
+        return settings.setSetting(key, value)

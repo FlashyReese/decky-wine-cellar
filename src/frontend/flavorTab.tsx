@@ -22,97 +22,67 @@ import {
   SteamCompatibilityTool,
   TaskType,
 } from "../types";
-import { error } from "../logger";
-import { Markdown } from "../components/Markdown";
-
-function ChangeLogModal({
-  release,
-  closeModal,
-}: {
-  release: GitHubRelease;
-  closeModal?: () => {};
-}) {
-  return (
-    <Focusable onCancelButton={closeModal}>
-      <Focusable
-        onActivate={() => {}}
-        style={{
-          marginTop: "40px",
-          height: "calc( 100% - 40px )",
-          overflowY: "scroll",
-          display: "flex",
-          justifyContent: "center",
-          margin: "40px",
-        }}
-      >
-        <div>
-          <h1>{release.name}</h1>
-          {release.body ? (
-            <Markdown>{`${release.body}`}</Markdown>
-          ) : (
-            "no patch notes for this version"
-          )}
-        </div>
-      </Focusable>
-    </Focusable>
-  );
-}
+import { error } from "../utils/logger";
+import ChangeLogModal from "../components/changeLogModal";
 
 export default function FlavorTab({
-  getAppState,
-  getFlavor,
-  getSocket,
+  appState,
+  flavor,
+  socket,
 }: {
-  getAppState: AppState;
-  getFlavor: Flavor;
-  getSocket: WebSocket;
+  appState: AppState;
+  flavor: Flavor;
+  socket: WebSocket;
 }) {
   const handleInstall = (release: GitHubRelease) => {
-    if (getSocket && getSocket.readyState === WebSocket.OPEN) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
       const response: Request = {
         type: RequestType.Task,
         task: {
           type: TaskType.InstallCompatibilityTool,
           install: {
-            flavor: getFlavor.flavor,
+            flavor: flavor.flavor,
             release: release,
           },
         },
       };
-      getSocket.send(JSON.stringify(response));
+      socket.send(JSON.stringify(response));
     } else {
       error("WebSocket not alive...");
     }
   };
 
   const handleUninstall = (release: SteamCompatibilityTool) => {
-    if (getSocket && getSocket.readyState === WebSocket.OPEN) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
       const response: Request = {
-        type: RequestType.Uninstall,
-        uninstall: {
-          flavor: getFlavor.flavor,
-          steam_compatibility_tool: release, //fixme: we should pass back a directory instead or uuid the backend to use it to find the directory
-        },
+        type: RequestType.Task,
+        task: {
+          type: TaskType.UninstallCompatibilityTool,
+          uninstall: {
+            flavor: flavor.flavor,
+            steam_compatibility_tool: release,
+          },
+        }
       };
-      getSocket.send(JSON.stringify(response));
+      socket.send(JSON.stringify(response));
     } else {
       error("WebSocket not alive...");
     }
   };
 
   const handleCancel = (release: GitHubRelease) => {
-    if (getSocket && getSocket.readyState === WebSocket.OPEN) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
       const response: Request = {
         type: RequestType.Task,
         task: {
           type: TaskType.CancelCompatibilityToolInstall,
           install: {
-            flavor: getFlavor.flavor,
+            flavor: flavor.flavor,
             release: release,
           },
         },
       };
-      getSocket.send(JSON.stringify(response));
+      socket.send(JSON.stringify(response));
     } else {
       error("WebSocket not alive...");
     }
@@ -139,12 +109,12 @@ export default function FlavorTab({
 
   return (
     <DialogBody>
-      {getFlavor.installed.length != 0 && (
+      {appState.installed_compatibility_tools.filter(t => t.flavor == flavor.flavor).length != 0 && (
         <DialogControlsSection>
           <DialogControlsSectionHeader>Installed</DialogControlsSectionHeader>
           <ul style={{ listStyleType: "none" }}>
-            {getFlavor.installed.map((release: SteamCompatibilityTool) => {
-              const isQueued = getAppState.in_progress !== null;
+            {appState.installed_compatibility_tools.filter(t => t.flavor == flavor.flavor).map((release: SteamCompatibilityTool) => {
+              const isQueued = appState.in_progress !== null;
               return (
                 <li
                   style={{
@@ -184,6 +154,17 @@ export default function FlavorTab({
                             >
                               Uninstall
                             </MenuItem>
+                            {release.github_release != null && (
+                                <MenuItem
+                                    onClick={() => {
+                                      if (release.github_release != null) {
+                                        handleViewChangeLog(release.github_release);
+                                      }
+                                    }}
+                                >
+                                  View Change Log
+                                </MenuItem>
+                            )}
                             {release.requires_restart && (
                               <MenuItem
                                 disabled={isQueued}
@@ -208,26 +189,27 @@ export default function FlavorTab({
           </ul>
         </DialogControlsSection>
       )}
-      {getFlavor.not_installed.length != 0 && (
+      {flavor.releases.length != 0 && (
         <DialogControlsSection>
           <DialogControlsSectionHeader>
             Not Installed
           </DialogControlsSectionHeader>
           <ul>
-            {getFlavor.not_installed.map((release) => {
-              const isQueued = getAppState.task_queue
+            {flavor.releases.map((release) => {
+              const isQueued =
+                appState.task_queue
                   .filter(
-                      (task) =>
-                          task.type == TaskType.InstallCompatibilityTool,
+                    (task) => task.type == TaskType.InstallCompatibilityTool,
                   )
                   .map((task) => task.install)
                   .filter(
-                      (install) =>
-                          install != null && install.release.url == release.url,
-                  ).length == 1
-              const isInProgress = getAppState.in_progress !== null;
+                    (install) =>
+                      install != null && install.release.url == release.url,
+                  ).length == 1;
+              const isInProgress = appState.in_progress !== null;
               const isItemInProgress =
-                isInProgress && getAppState.in_progress?.name === release.tag_name;
+                isInProgress &&
+                appState.in_progress?.name === release.tag_name;
               return (
                 <li
                   style={{
@@ -250,12 +232,12 @@ export default function FlavorTab({
                       }}
                     >
                       <ProgressBarWithInfo
-                        nProgress={getAppState.in_progress?.progress}
+                        nProgress={appState.in_progress?.progress}
                         indeterminate={
-                          getAppState.in_progress?.state ==
+                          appState.in_progress?.state ==
                           QueueCompatibilityToolState.Extracting
                         }
-                        sOperationText={getAppState.in_progress?.state}
+                        sOperationText={appState.in_progress?.state}
                         bottomSeparator="none"
                       />
                     </div>
@@ -279,7 +261,7 @@ export default function FlavorTab({
                         showContextMenu(
                           <Menu label="Runner Actions">
                             <MenuItem
-                              disabled={(isItemInProgress || isQueued) }
+                              disabled={isItemInProgress || isQueued}
                               onSelected={() => {}}
                               onClick={() => {
                                 handleInstall(release);
@@ -288,9 +270,13 @@ export default function FlavorTab({
                               Install
                             </MenuItem>
                             {(isItemInProgress || isQueued) && (
-                              <MenuItem onClick={() => {
-                                handleCancel(release);
-                              }}>Cancel from Installation</MenuItem>
+                              <MenuItem
+                                onClick={() => {
+                                  handleCancel(release);
+                                }}
+                              >
+                                Cancel from Installation
+                              </MenuItem>
                             )}
                             <MenuItem
                               onClick={() => {

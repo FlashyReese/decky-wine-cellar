@@ -7,8 +7,7 @@ edition = "2021"
 
 [dependencies]
 # Logging deps
-log = "0.4.20"
-env_logger = "0.10.0"
+log = { version = "0.4.20", features = ["std"] }
 chrono = "0.4.26"
 # Websocket deps
 reqwest = { version = "0.11.18", default-features = false, features = ["stream", "blocking", "rustls-tls"] }

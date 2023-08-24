@@ -1,11 +1,9 @@
+use crate::steam_util::CompatibilityTool;
+use crate::wine_cask::app::WineCask;
+use crate::wine_cask::generate_compatibility_tool_vdf;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
-use crate::steam_util::CompatibilityTool;
-use crate::wine_cask::generate_compatibility_tool_vdf;
-use crate::wine_cask::wine_cask::WineCask;
-
-
 
 // Internal only
 #[derive(Serialize, Deserialize, Clone)]
@@ -14,9 +12,11 @@ pub struct VirtualCompatibilityToolMetadata {
     virtual_original: String,
 }
 
-
 impl WineCask {
-    fn lookup_virtual_compatibility_tool_metadata(&self, compat_tool: &CompatibilityTool) -> VirtualCompatibilityToolMetadata {
+    fn lookup_virtual_compatibility_tool_metadata(
+        &self,
+        compat_tool: &CompatibilityTool,
+    ) -> VirtualCompatibilityToolMetadata {
         let metadata_file = compat_tool.path.join("wine-cask-metadata.json"); // fixme: Store in runtime data dir instead
         if metadata_file.exists() && metadata_file.is_file() {
             let metadata = fs::read_to_string(metadata_file).unwrap();
@@ -62,6 +62,6 @@ impl WineCask {
             metadata_file,
             serde_json::to_string_pretty(&metadata).unwrap(),
         )
-            .unwrap();
+        .unwrap();
     }
 }

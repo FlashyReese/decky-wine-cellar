@@ -1,23 +1,24 @@
 mod github_util;
+mod multilogger;
 mod steam_util;
 mod wine_cask;
 
+use crate::multilogger::MultiLogger;
+use crate::steam_util::SteamUtil;
+use crate::wine_cask::app::{AppState, Request, RequestType, TaskType, UpdaterState, WineCask};
 use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, stream::TryStreamExt, StreamExt};
-use log::{error, info, LevelFilter};
+use log::{error, info, Level};
 use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::fs::OpenOptions;
-use std::io::{Error as IoError, Write as IoWrite};
+use std::io::Error as IoError;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use env_logger::Env;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
-use crate::steam_util::SteamUtil;
-use crate::wine_cask::wine_cask::{AppState, Request, RequestType, Task, WineCask, TaskType};
 
 type Tx = UnboundedSender<Message>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
@@ -26,7 +27,7 @@ type ArcWineCask = Arc<WineCask>;
 
 #[tokio::main]
 async fn main() -> Result<(), IoError> {
-    configure_logger()?;
+    configure_logger().unwrap();
 
     let addr = get_server_address();
 
@@ -39,7 +40,10 @@ async fn main() -> Result<(), IoError> {
         installed_compatibility_tools: Vec::new(),
         in_progress: None,
         task_queue: VecDeque::new(),
+        updater_state: UpdaterState::Idle,
+        updater_last_check: None,
         available_compat_tools: None,
+        flavors: Vec::new(),
     }));
 
     let wine_cask = WineCask {
@@ -77,7 +81,12 @@ async fn start_server(addr: String, wine_cask: Arc<WineCask>, state: PeerMap) {
     }
 }
 
-async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stream: TcpStream, addr: SocketAddr) {
+async fn handle_connection(
+    wine_cask: Arc<WineCask>,
+    peer_map: PeerMap,
+    raw_stream: TcpStream,
+    addr: SocketAddr,
+) {
     info!("Incoming TCP connection from: {}", addr);
 
     let ws_stream = tokio_tungstenite::accept_async(raw_stream)
@@ -124,28 +133,13 @@ async fn handle_connection(wine_cask: Arc<WineCask>, peer_map: PeerMap, raw_stre
 }
 
 fn configure_logger() -> Result<(), IoError> {
-    let path = env::var("DECKY_PLUGIN_LOG")
-        .unwrap_or_else(|_| "/tmp/decky-wine-cellar.log".to_string());
+    let path =
+        env::var("DECKY_PLUGIN_LOG").unwrap_or_else(|_| "/tmp/decky-wine-cellar.log".to_string());
 
-    let target = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let target = OpenOptions::new().create(true).append(true).open(path)?;
 
-    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "[Wine Cask] {} {} {}",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                record.level(),
-                record.args()
-            )
-        })
-        //.filter(None, LevelFilter::Info)
-        //.target(env_logger::Target::Pipe(Box::new(target))) //todo: pipe to stdout and file
-        .target(env_logger::Target::Stdout)
-        .init();
+    MultiLogger::init(target, Level::Info).expect("Could not configure logger");
+
     Ok(())
 }
 
@@ -159,25 +153,28 @@ fn get_steam_directory() -> PathBuf {
     match env::var("DECKY_USER_HOME") {
         Ok(value) => {
             let steam = PathBuf::from(value).join(".steam");
-            return if steam.exists() {
+            if steam.exists() {
                 steam
             } else {
                 SteamUtil::find_steam_directory().unwrap() // Todo: Handle if no steam folder is found, although this should never happen
             }
         }
         Err(_) => {
-            error!("Couldn't find environment variable DECKY_USER_HOME, using default steam directory");
+            error!(
+                "Couldn't find environment variable DECKY_USER_HOME, using default steam directory"
+            );
             SteamUtil::find_steam_directory().unwrap()
         }
     }
 }
 
 async fn initialize_app_state(wine_cask: &WineCask) {
-    let mut appstate = wine_cask.app_state.lock().await;
-    appstate.installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
-    appstate.available_flavors = wine_cask
-        .get_flavors(appstate.installed_compatibility_tools.clone(), false)
-        .await;
+    wine_cask
+        .app_state
+        .lock()
+        .await
+        .installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
+    //wine_cask.app_state.lock().await.flavors = wine_cask.get_flavors(false).await;
 }
 
 async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap) {
@@ -185,7 +182,12 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
         match request.r#type {
             RequestType::RequestState => {
                 // Assumes available_compat_tools is Some
-                wine_cask.process_frontend_compat_tools_update(peer_map, request.available_compat_tools.unwrap()).await;
+                wine_cask
+                    .process_frontend_compat_tools_update(
+                        peer_map,
+                        request.available_compat_tools.unwrap(),
+                    )
+                    .await;
                 wine_cask.update_used_by_games(peer_map).await;
             }
             RequestType::Task => {
@@ -193,14 +195,27 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
                     if task.r#type == TaskType::InstallCompatibilityTool {
                         wine_cask.add_to_task_queue(task, peer_map).await;
                     } else if task.r#type == TaskType::CancelCompatibilityToolInstall {
-                        wine_cask.remove_or_cancel_from_task_queue(task, peer_map).await;
+                        wine_cask
+                            .remove_or_cancel_from_task_queue(task, peer_map)
+                            .await;
+                    } else if task.r#type == TaskType::UninstallCompatibilityTool {
+                        wine_cask
+                            .uninstall_compatibility_tool(
+                                task.uninstall.unwrap().steam_compatibility_tool,
+                                peer_map,
+                            )
+                            .await;
+                    } else if task.r#type == TaskType::CheckForFlavorUpdates {
+                        wine_cask.check_for_flavor_updates(peer_map, true).await;
                     }
                 } else {
-                    wine_cask.broadcast_notification(peer_map, "Something went wrong with the task request").await;
+                    wine_cask
+                        .broadcast_notification(
+                            peer_map,
+                            "Something went wrong with the task request",
+                        )
+                        .await;
                 }
-            }
-            RequestType::Uninstall => {
-                wine_cask.uninstall_compatibility_tool(request.uninstall.unwrap().steam_compatibility_tool, peer_map).await;
             }
             _ => {}
         }

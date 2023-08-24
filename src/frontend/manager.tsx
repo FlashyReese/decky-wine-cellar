@@ -16,27 +16,30 @@ import {
   CompatibilityToolFlavor,
   Request,
   RequestType,
-  SteamCompatibilityTool,
+  SteamCompatibilityTool, TaskType,
 } from "../types";
-import { error } from "../logger";
+import { error } from "../utils/logger";
 
 export default function ManagerTab({
-  getAppState,
-  getSocket,
+  appState,
+  socket,
 }: {
-  getAppState: AppState;
-  getSocket: WebSocket;
+  appState: AppState;
+  socket: WebSocket;
 }) {
   const handleUninstall = (release: SteamCompatibilityTool) => {
-    if (getSocket && getSocket.readyState === WebSocket.OPEN) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
       const response: Request = {
-        type: RequestType.Uninstall,
-        uninstall: {
-          flavor: CompatibilityToolFlavor.Unknown,
-          steam_compatibility_tool: release, //fixme: we should pass back a directory instead or uuid the backend to use it to find the directory
-        },
+        type: RequestType.Task,
+        task: {
+          type: TaskType.UninstallCompatibilityTool,
+          uninstall: {
+            flavor: CompatibilityToolFlavor.Unknown,
+            steam_compatibility_tool: release,
+          },
+        }
       };
-      getSocket.send(JSON.stringify(response));
+      socket.send(JSON.stringify(response));
     } else {
       error("WebSocket not alive...");
     }
@@ -44,15 +47,13 @@ export default function ManagerTab({
 
   const handleViewUsedByGames = (release: SteamCompatibilityTool) => {
     showModal(
-        <ConfirmModal
-            strTitle={"Steam Applications using " + release.display_name}
-            strDescription={
-                release.used_by_games.join("\n")
-            }
-            strOKButtonText={"OK"}
-        />,
+      <ConfirmModal
+        strTitle={"Steam Applications using " + release.display_name}
+        strDescription={release.used_by_games.join(",")}
+        strOKButtonText={"OK"}
+      />,
     );
-  }
+  };
 
   const handleUninstallModal = (release: SteamCompatibilityTool) =>
     showModal(
@@ -75,7 +76,7 @@ export default function ManagerTab({
       <DialogControlsSection>
         <DialogControlsSectionHeader>Installed</DialogControlsSectionHeader>
         <ul>
-          {getAppState.installed_compatibility_tools.map(
+          {appState.installed_compatibility_tools.map(
             (steam_compatibility_tool) => {
               return (
                 <li
@@ -88,8 +89,10 @@ export default function ManagerTab({
                 >
                   <span>
                     {steam_compatibility_tool.display_name}
-                    {steam_compatibility_tool.requires_restart && ("(Requires Restart)")}
-                    {steam_compatibility_tool.used_by_games.length != 0 && ("(In Use)")}
+                    {steam_compatibility_tool.requires_restart &&
+                      " (Requires Restart)"}
+                    {steam_compatibility_tool.used_by_games.length != 0 &&
+                      " (Used By Games)"}
                   </span>
                   <Focusable
                     style={{
@@ -117,16 +120,19 @@ export default function ManagerTab({
                             >
                               Uninstall
                             </MenuItem>
-                            {steam_compatibility_tool.used_by_games.length != 0 && (
-                                <MenuItem
-                                    onSelected={() => {}}
-                                    onClick={() => {
-                                      handleViewUsedByGames(steam_compatibility_tool);
-                                    }}
-                                >
-                                  View Used By Games
-                                </MenuItem>
-                                )}
+                            {steam_compatibility_tool.used_by_games.length !=
+                              0 && (
+                              <MenuItem
+                                onSelected={() => {}}
+                                onClick={() => {
+                                  handleViewUsedByGames(
+                                    steam_compatibility_tool,
+                                  );
+                                }}
+                              >
+                                View Used By Games
+                              </MenuItem>
+                            )}
                           </Menu>,
                           e.currentTarget ?? window,
                         )

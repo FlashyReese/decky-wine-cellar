@@ -32,6 +32,11 @@ pub struct Asset {
     pub browser_download_url: String,
 }
 
+#[derive(Deserialize, Serialize, Clone)]
+pub struct Response {
+    pub message: String,
+}
+
 pub async fn list_all_releases(
     owner: &str,
     repository: &str,
@@ -54,13 +59,20 @@ pub async fn list_all_releases(
 
         if response.status().is_success() {
             let response_text = response.text().await?;
-            let page_releases: Vec<Release> = serde_json::from_str(&response_text)?;
+            if let Ok(page_releases) = serde_json::from_str::<Vec<Release>>(&response_text) {
+                if page_releases.is_empty() {
+                    break; // No more releases, exit the loop
+                }
 
-            if page_releases.is_empty() {
-                break; // No more releases, exit the loop
+                releases.extend(page_releases);
+            } else {
+                return if let Ok(response) = serde_json::from_str::<Response>(&response_text)
+                {
+                    Err(GitHubUtilError::RateLimitError(response.message))
+                } else {
+                    Err(GitHubUtilError::JsonParsingError(response_text))
+                };
             }
-
-            releases.extend(page_releases);
             page += 1;
         } else {
             return Err(GitHubUtilError::RequestError(format!(
@@ -77,13 +89,19 @@ pub async fn list_all_releases(
 pub enum GitHubUtilError {
     RequestError(String),
     JsonParsingError(String),
+    RateLimitError(String),
 }
 
 impl Display for GitHubUtilError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             GitHubUtilError::RequestError(json) => write!(f, "Request Error: {}", json),
-            GitHubUtilError::JsonParsingError(json) => write!(f, "Failed to parse Json: {}", json),
+            GitHubUtilError::JsonParsingError(json) => {
+                write!(f, "Failed to parse Json: {}", json)
+            }
+            GitHubUtilError::RateLimitError(json) => {
+                write!(f, "Failed to parse Json: {}", json)
+            }
         }
     }
 }

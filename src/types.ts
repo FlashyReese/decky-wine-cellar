@@ -1,4 +1,4 @@
-import {CompatToolInfo} from "./SteamUtil";
+import { CompatToolInfo } from "./utils/steamUtils";
 
 export type GitHubRelease = {
   url: String;
@@ -29,34 +29,36 @@ export type Asset = {
 export type AppState = {
   available_flavors: Flavor[];
   installed_compatibility_tools: SteamCompatibilityTool[];
-  in_progress?: QueueCompatibilityTool | null;
+  in_progress?: QueueCompatibilityTool;
   task_queue: Task[];
+  updater_state: UpdaterState;
+  updater_last_check?: number;
 };
 
 export type Task = {
   type: TaskType;
   install?: Install;
+  uninstall?: Uninstall;
 };
 
 export enum TaskType {
+  CheckForFlavorUpdates = "CheckForFlavorUpdates",
   InstallCompatibilityTool = "InstallCompatibilityTool",
   CancelCompatibilityToolInstall = "CancelCompatibilityToolInstall",
+  UninstallCompatibilityTool = "UninstallCompatibilityTool",
 }
 
 export type Flavor = {
   flavor: CompatibilityToolFlavor;
-  installed: SteamCompatibilityTool[];
-  not_installed: GitHubRelease[];
+  releases: GitHubRelease[];
 };
 
 export type Request = {
   type: RequestType;
-  task?: Task | null;
-  available_compat_tools?: CompatToolInfo[] | null;
-  notification?: string | null;
-  app_state?: AppState | null;
-  install?: Install | null;
-  uninstall?: Uninstall | null;
+  task?: Task;
+  available_compat_tools?: CompatToolInfo[];
+  notification?: string;
+  app_state?: AppState;
 };
 
 export type Install = {
@@ -77,6 +79,7 @@ export type SteamCompatibilityTool = {
   display_name: string;
   used_by_games: string[];
   requires_restart: boolean;
+  flavor: CompatibilityToolFlavor
   github_release?: GitHubRelease;
 };
 
@@ -88,10 +91,15 @@ export type QueueCompatibilityTool = {
   progress: number;
 };
 
+export enum UpdaterState {
+    Idle = "Idle",
+    Checking = "Checking",
+}
+
 export enum CompatibilityToolFlavor {
   Unknown = "Unknown",
   ProtonGE = "ProtonGE",
-  SteamTinkerLaunch = "SteamTinkerLaunch",
+  //SteamTinkerLaunch = "SteamTinkerLaunch",
   Luxtorpeda = "Luxtorpeda",
   Boxtron = "Boxtron",
 }
@@ -104,7 +112,6 @@ export enum QueueCompatibilityToolState {
 
 export enum RequestType {
   Task = "Task",
-  Uninstall = "Uninstall",
   RequestState = "RequestState",
   UpdateState = "UpdateState",
   Notification = "Notification",

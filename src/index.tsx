@@ -11,7 +11,7 @@ import { VFC } from "react";
 import { FaShip } from "react-icons/fa";
 
 import ManagePage from "./frontend";
-import {forceCloseToastsWebSocket, setupToasts} from "./toasts";
+import { forceCloseToastsWebSocket, setupToasts } from "./utils/toasts";
 
 const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
   return (
