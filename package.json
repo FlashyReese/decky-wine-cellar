@@ -19,7 +19,7 @@
     "deck"
   ],
   "author": "Yao Chung Hu <flashyreese@protonmail.com>",
-  "license": "BSD-3-Clause",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/FlashyReese/decky-wine-cellar/issues"
   },

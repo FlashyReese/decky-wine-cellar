@@ -33,7 +33,6 @@ export const setupToasts = (serverAPI: ServerAPI): void => {
           log("Received backend notification: " + response.notification);
         }
       }
-      console.log(JSON.stringify(response));
     };
 
     socket.onclose = (e: CloseEvent): void => {
