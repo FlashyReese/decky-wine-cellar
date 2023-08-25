@@ -66,9 +66,8 @@ pub async fn list_all_releases(
 
                 releases.extend(page_releases);
             } else {
-                return if let Ok(response) = serde_json::from_str::<Response>(&response_text)
-                {
-                    Err(GitHubUtilError::RateLimitError(response.message))
+                return if let Ok(response) = serde_json::from_str::<Response>(&response_text) {
+                    Err(GitHubUtilError::ResponseError(response.message))
                 } else {
                     Err(GitHubUtilError::JsonParsingError(response_text))
                 };
@@ -89,7 +88,7 @@ pub async fn list_all_releases(
 pub enum GitHubUtilError {
     RequestError(String),
     JsonParsingError(String),
-    RateLimitError(String),
+    ResponseError(String),
 }
 
 impl Display for GitHubUtilError {
@@ -99,8 +98,8 @@ impl Display for GitHubUtilError {
             GitHubUtilError::JsonParsingError(json) => {
                 write!(f, "Failed to parse Json: {}", json)
             }
-            GitHubUtilError::RateLimitError(json) => {
-                write!(f, "Failed to parse Json: {}", json)
+            GitHubUtilError::ResponseError(json) => {
+                write!(f, "Response error: {}", json)
             }
         }
     }

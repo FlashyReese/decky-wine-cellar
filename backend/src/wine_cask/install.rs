@@ -94,7 +94,7 @@ impl WineCask {
                     }
                 } else {
                     let error_message =
-                        "Connection issues detected! Download in progress failed!".to_string();
+                        "Connection Error: Download in progress failed!".to_string();
                     error!("{}", error_message);
                     self.app_state.lock().await.in_progress = None;
                     self.broadcast_app_state(peer_map).await;
@@ -209,7 +209,7 @@ impl WineCask {
             cleanup_temp_directory(&temp_dir);
 
             // Mark as completed
-            let message = format!("Installed {}!", install.release.name);
+            let message = format!("Installation Completed: {}", install.release.name);
             info!("{}", message);
             self.broadcast_notification(peer_map, message.as_str())
                 .await;

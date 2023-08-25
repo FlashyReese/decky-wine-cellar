@@ -24,6 +24,7 @@ import {
 } from "../types";
 import { error } from "../utils/logger";
 import ChangeLogModal from "../components/changeLogModal";
+import { RestartSteamClient } from "../utils/steamUtils";
 
 export default function FlavorTab({
   appState,
@@ -34,7 +35,7 @@ export default function FlavorTab({
   flavor: Flavor;
   socket: WebSocket;
 }) {
-  const handleInstall = (release: GitHubRelease) => {
+  const handleInstall = (gitHubRelease: GitHubRelease) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       const response: Request = {
         type: RequestType.Task,
@@ -42,7 +43,7 @@ export default function FlavorTab({
           type: TaskType.InstallCompatibilityTool,
           install: {
             flavor: flavor.flavor,
-            release: release,
+            release: gitHubRelease,
           },
         },
       };
@@ -52,7 +53,7 @@ export default function FlavorTab({
     }
   };
 
-  const handleUninstall = (release: SteamCompatibilityTool) => {
+  const handleUninstall = (steamCompatibilityTool: SteamCompatibilityTool) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       const response: Request = {
         type: RequestType.Task,
@@ -60,25 +61,7 @@ export default function FlavorTab({
           type: TaskType.UninstallCompatibilityTool,
           uninstall: {
             flavor: flavor.flavor,
-            steam_compatibility_tool: release,
-          },
-        }
-      };
-      socket.send(JSON.stringify(response));
-    } else {
-      error("WebSocket not alive...");
-    }
-  };
-
-  const handleCancel = (release: GitHubRelease) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const response: Request = {
-        type: RequestType.Task,
-        task: {
-          type: TaskType.CancelCompatibilityToolInstall,
-          install: {
-            flavor: flavor.flavor,
-            release: release,
+            steam_compatibility_tool: steamCompatibilityTool,
           },
         },
       };
@@ -88,104 +71,163 @@ export default function FlavorTab({
     }
   };
 
-  const handleUninstallModal = (release: SteamCompatibilityTool) =>
+  const handleViewUsedByGames = (
+    steamCompatibilityTool: SteamCompatibilityTool,
+  ) => {
     showModal(
       <ConfirmModal
-        strTitle={"Uninstallation of " + release.display_name}
+        strTitle={
+          "Steam Applications using " + steamCompatibilityTool.display_name
+        }
+        strDescription={steamCompatibilityTool.used_by_games.join(", ")}
+        strOKButtonText={"OK"}
+      />,
+    );
+  };
+
+  const handleCancel = (gitHubRelease: GitHubRelease) => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const response: Request = {
+        type: RequestType.Task,
+        task: {
+          type: TaskType.CancelCompatibilityToolInstall,
+          install: {
+            flavor: flavor.flavor,
+            release: gitHubRelease,
+          },
+        },
+      };
+      socket.send(JSON.stringify(response));
+    } else {
+      error("WebSocket not alive...");
+    }
+  };
+
+  const handleUninstallModal = (
+    steamCompatibilityTool: SteamCompatibilityTool,
+  ) =>
+    showModal(
+      <ConfirmModal
+        strTitle={"Uninstallation of " + steamCompatibilityTool.display_name}
         strDescription={
           "Are you sure want to remove this compatibility tool? Used by " +
-          release.used_by_games.join(",")
+          steamCompatibilityTool.used_by_games.join(",")
         }
         strOKButtonText={"Uninstall"}
         strCancelButtonText={"Cancel"}
         onOK={() => {
-          handleUninstall(release);
+          handleUninstall(steamCompatibilityTool);
         }}
       />,
     );
 
-  const handleViewChangeLog = (release: GitHubRelease) =>
-    showModal(<ChangeLogModal release={release} />);
+  const handleViewChangeLog = (gitHubRelease: GitHubRelease) =>
+    showModal(<ChangeLogModal release={gitHubRelease} />);
 
   return (
     <DialogBody>
-      {appState.installed_compatibility_tools.filter(t => t.flavor == flavor.flavor).length != 0 && (
+      {appState.installed_compatibility_tools.filter(
+        (t) => t.flavor == flavor.flavor,
+      ).length != 0 && (
         <DialogControlsSection>
           <DialogControlsSectionHeader>Installed</DialogControlsSectionHeader>
           <ul style={{ listStyleType: "none" }}>
-            {appState.installed_compatibility_tools.filter(t => t.flavor == flavor.flavor).map((release: SteamCompatibilityTool) => {
-              const isQueued = appState.in_progress !== null;
-              return (
-                <li
-                  style={{
-                    display: "flex",
-                    flexDirection: "row",
-                    alignItems: "center",
-                    paddingBottom: "10px",
-                  }}
-                >
-                  <span>
-                    {release.display_name}{" "}
-                    {release.requires_restart && "(Requires Restart)"}
-                    {release.used_by_games.length != 0 && "(Used By Games)"}
-                  </span>
-                  <Focusable
+            {appState.installed_compatibility_tools
+              .filter((t) => t.flavor == flavor.flavor)
+              .map((steamCompatibilityTool: SteamCompatibilityTool) => {
+                const isQueued = appState.in_progress !== null;
+                return (
+                  <li
                     style={{
-                      marginLeft: "auto",
-                      boxShadow: "none",
                       display: "flex",
-                      justifyContent: "right",
+                      flexDirection: "row",
+                      alignItems: "center",
+                      paddingBottom: "10px",
                     }}
                   >
-                    <DialogButton
+                    <span>
+                      {steamCompatibilityTool.display_name}{" "}
+                      {steamCompatibilityTool.requires_restart &&
+                        "(Requires Restart)"}
+                      {steamCompatibilityTool.used_by_games.length != 0 &&
+                        "(Used By Games)"}
+                    </span>
+                    <Focusable
                       style={{
-                        height: "40px",
-                        width: "40px",
-                        padding: "10px 12px",
-                        minWidth: "40px",
+                        marginLeft: "auto",
+                        boxShadow: "none",
+                        display: "flex",
+                        justifyContent: "right",
                       }}
-                      onClick={(e: MouseEvent) =>
-                        showContextMenu(
-                          <Menu label="Runner Actions">
-                            <MenuItem
-                              onClick={() => {
-                                handleUninstallModal(release);
-                              }}
-                            >
-                              Uninstall
-                            </MenuItem>
-                            {release.github_release != null && (
+                    >
+                      <DialogButton
+                        style={{
+                          height: "40px",
+                          width: "40px",
+                          padding: "10px 12px",
+                          minWidth: "40px",
+                        }}
+                        onClick={(e: MouseEvent) =>
+                          showContextMenu(
+                            <Menu label="Runner Actions">
+                              <MenuItem
+                                onClick={() => {
+                                  handleUninstallModal(steamCompatibilityTool);
+                                }}
+                              >
+                                Uninstall
+                              </MenuItem>
+                              {steamCompatibilityTool.used_by_games.length !=
+                                0 && (
                                 <MenuItem
-                                    onClick={() => {
-                                      if (release.github_release != null) {
-                                        handleViewChangeLog(release.github_release);
-                                      }
-                                    }}
+                                  onSelected={() => {}}
+                                  onClick={() => {
+                                    handleViewUsedByGames(
+                                      steamCompatibilityTool,
+                                    );
+                                  }}
+                                >
+                                  View Used By Games
+                                </MenuItem>
+                              )}
+                              {steamCompatibilityTool.github_release !=
+                                null && (
+                                <MenuItem
+                                  onClick={() => {
+                                    if (
+                                      steamCompatibilityTool.github_release !=
+                                      null
+                                    ) {
+                                      handleViewChangeLog(
+                                        steamCompatibilityTool.github_release,
+                                      );
+                                    }
+                                  }}
                                 >
                                   View Change Log
                                 </MenuItem>
-                            )}
-                            {release.requires_restart && (
-                              <MenuItem
-                                disabled={isQueued}
-                                onClick={() => {
-                                  SteamClient.User.StartRestart();
-                                }}
-                              >
-                                Restart Steam
-                              </MenuItem>
-                            )}
-                          </Menu>,
-                          e.currentTarget ?? window,
-                        )
-                      }
-                    >
-                      <FaEllipsisH />
-                    </DialogButton>
-                  </Focusable>
-                </li>
-              );
-            })}
+                              )}
+                              {steamCompatibilityTool.requires_restart && (
+                                <MenuItem
+                                  disabled={isQueued}
+                                  onClick={() => {
+                                    RestartSteamClient();
+                                  }}
+                                >
+                                  Restart Steam
+                                </MenuItem>
+                              )}
+                            </Menu>,
+                            e.currentTarget ?? window,
+                          )
+                        }
+                      >
+                        <FaEllipsisH />
+                      </DialogButton>
+                    </Focusable>
+                  </li>
+                );
+              })}
           </ul>
         </DialogControlsSection>
       )}
@@ -208,8 +250,7 @@ export default function FlavorTab({
                   ).length == 1;
               const isInProgress = appState.in_progress !== null;
               const isItemInProgress =
-                isInProgress &&
-                appState.in_progress?.name === release.tag_name;
+                isInProgress && appState.in_progress?.name === release.tag_name;
               return (
                 <li
                   style={{

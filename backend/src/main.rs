@@ -212,7 +212,7 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
                     wine_cask
                         .broadcast_notification(
                             peer_map,
-                            "Something went wrong with the task request",
+                            "Error: Something went wrong with the task request",
                         )
                         .await;
                 }

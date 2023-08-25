@@ -6,11 +6,11 @@ import { log } from "../utils/logger";
 import { v4 as uuidv4 } from "uuid";
 import FlavorTab from "./flavorTab";
 import ManagerTab from "./manager";
-import {GetAvailableCompatTools} from "../utils/steamUtils";
+import { GetAvailableCompatTools } from "../utils/steamUtils";
 import About from "./about";
 
 export default function ManagePage() {
-  const [appState, setAppState] = useState<AppState | null>(null);
+  const [appState, setAppState] = useState<AppState | undefined>();
 
   const [socket, setSocket] = useState<WebSocket>();
 
@@ -63,7 +63,7 @@ export default function ManagePage() {
     // Regular dashboard
     pages.push({
       title: "Dashboard",
-      content: <ManagerTab appState={appState} socket={socket}/>,
+      content: <ManagerTab appState={appState} socket={socket} />,
       route: "/wine-cellar/dashboard",
     });
 
@@ -72,31 +72,31 @@ export default function ManagePage() {
       pages.push({
         title: flavor.flavor,
         content: (
-          <FlavorTab
-            appState={appState}
-            flavor={flavor}
-            socket={socket}
-          />
+          <FlavorTab appState={appState} flavor={flavor} socket={socket} />
         ),
         route: "/wine-cellar/" + flavor.flavor,
       });
-    });
-
-
-    // About page
-    pages.push({
-      title: "About",
-      content: <About appState={appState} socket={socket}/>,
-      route: "/wine-cellar/about"
     });
   } else {
     // Loading page
     pages.push({
       title: "Preparing...",
-      content: <div>Hang tight! We're preparing your Wine Cellar experience. If this is taking longer than expected, the backend might be having a siesta.</div>,
+      content: (
+        <div>
+          Hang tight! We're preparing your Wine Cellar experience. If this is
+          taking longer than expected, the backend might be having a siesta.
+        </div>
+      ),
       route: "/wine-cellar/preparing",
     });
   }
+
+  // About page
+  pages.push({
+    title: "About",
+    content: <About appState={appState} socket={socket} />,
+    route: "/wine-cellar/about",
+  });
 
   return <SidebarNavigation title="Wine Cellar" showTitle pages={pages} />;
 }

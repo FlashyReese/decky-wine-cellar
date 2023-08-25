@@ -94,15 +94,24 @@ impl WineCask {
             app_state.task_queue.remove(position);
             drop(app_state);
             self.broadcast_app_state(peer_map).await;
-            self.broadcast_notification(peer_map, "Canceled compatibility tool install")
-                .await;
+            self.broadcast_notification(
+                peer_map,
+                "Cancelled: Compatibility tool installation removed from queue",
+            )
+            .await;
         } else if let Some(in_progress) = &mut app_state.in_progress {
             in_progress.state = QueueCompatibilityToolState::Cancelling;
-            self.broadcast_notification(peer_map, "Cancelling compatibility tool install")
-                .await;
+            self.broadcast_notification(
+                peer_map,
+                "Cancelling: Compatibility tool installation in progress",
+            )
+            .await;
         } else {
-            self.broadcast_notification(peer_map, "Couldn't find compatibility tool in queue")
-                .await;
+            self.broadcast_notification(
+                peer_map,
+                "Not Found: Compatibility tool not found in queue",
+            )
+            .await;
         }
     }
 

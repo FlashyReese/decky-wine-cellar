@@ -79,7 +79,7 @@ export type SteamCompatibilityTool = {
   display_name: string;
   used_by_games: string[];
   requires_restart: boolean;
-  flavor: CompatibilityToolFlavor
+  flavor: CompatibilityToolFlavor;
   github_release?: GitHubRelease;
 };
 
@@ -92,8 +92,8 @@ export type QueueCompatibilityTool = {
 };
 
 export enum UpdaterState {
-    Idle = "Idle",
-    Checking = "Checking",
+  Idle = "Idle",
+  Checking = "Checking",
 }
 
 export enum CompatibilityToolFlavor {

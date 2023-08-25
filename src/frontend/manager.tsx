@@ -14,11 +14,15 @@ import { FaEllipsisH } from "react-icons/fa";
 import {
   AppState,
   CompatibilityToolFlavor,
+  GitHubRelease,
   Request,
   RequestType,
-  SteamCompatibilityTool, TaskType,
+  SteamCompatibilityTool,
+  TaskType,
 } from "../types";
 import { error } from "../utils/logger";
+import { RestartSteamClient } from "../utils/steamUtils";
+import ChangeLogModal from "../components/changeLogModal";
 
 export default function ManagerTab({
   appState,
@@ -37,7 +41,7 @@ export default function ManagerTab({
             flavor: CompatibilityToolFlavor.Unknown,
             steam_compatibility_tool: release,
           },
-        }
+        },
       };
       socket.send(JSON.stringify(response));
     } else {
@@ -49,20 +53,20 @@ export default function ManagerTab({
     showModal(
       <ConfirmModal
         strTitle={"Steam Applications using " + release.display_name}
-        strDescription={release.used_by_games.join(",")}
+        strDescription={release.used_by_games.join(", ")}
         strOKButtonText={"OK"}
       />,
     );
   };
 
+  const handleViewChangeLog = (release: GitHubRelease) =>
+    showModal(<ChangeLogModal release={release} />);
+
   const handleUninstallModal = (release: SteamCompatibilityTool) =>
     showModal(
       <ConfirmModal
         strTitle={"Uninstallation of " + release.display_name}
-        strDescription={
-          "Are you sure want to remove this compatibility tool? Used by " +
-          release.used_by_games.join(",")
-        }
+        strDescription={"Are you sure want to remove this compatibility tool?"}
         strOKButtonText={"Uninstall"}
         strCancelButtonText={"Cancel"}
         onOK={() => {
@@ -77,7 +81,7 @@ export default function ManagerTab({
         <DialogControlsSectionHeader>Installed</DialogControlsSectionHeader>
         <ul>
           {appState.installed_compatibility_tools.map(
-            (steam_compatibility_tool) => {
+            (steamCompatibilityTool: SteamCompatibilityTool) => {
               return (
                 <li
                   style={{
@@ -88,10 +92,10 @@ export default function ManagerTab({
                   }}
                 >
                   <span>
-                    {steam_compatibility_tool.display_name}
-                    {steam_compatibility_tool.requires_restart &&
+                    {steamCompatibilityTool.display_name}
+                    {steamCompatibilityTool.requires_restart &&
                       " (Requires Restart)"}
-                    {steam_compatibility_tool.used_by_games.length != 0 &&
+                    {steamCompatibilityTool.used_by_games.length != 0 &&
                       " (Used By Games)"}
                   </span>
                   <Focusable
@@ -115,22 +119,48 @@ export default function ManagerTab({
                             <MenuItem
                               onSelected={() => {}}
                               onClick={() => {
-                                handleUninstallModal(steam_compatibility_tool);
+                                handleUninstallModal(steamCompatibilityTool);
                               }}
                             >
                               Uninstall
                             </MenuItem>
-                            {steam_compatibility_tool.used_by_games.length !=
+                            {steamCompatibilityTool.used_by_games.length !=
                               0 && (
                               <MenuItem
                                 onSelected={() => {}}
                                 onClick={() => {
-                                  handleViewUsedByGames(
-                                    steam_compatibility_tool,
-                                  );
+                                  handleViewUsedByGames(steamCompatibilityTool);
                                 }}
                               >
                                 View Used By Games
+                              </MenuItem>
+                            )}
+                            {steamCompatibilityTool.github_release != null && (
+                              <MenuItem
+                                onClick={() => {
+                                  if (
+                                    steamCompatibilityTool.github_release !=
+                                    null
+                                  ) {
+                                    handleViewChangeLog(
+                                      steamCompatibilityTool.github_release,
+                                    );
+                                  }
+                                }}
+                              >
+                                View Change Log
+                              </MenuItem>
+                            )}
+                            {steamCompatibilityTool.requires_restart && (
+                              <MenuItem
+                                disabled={
+                                  !steamCompatibilityTool.requires_restart
+                                }
+                                onClick={() => {
+                                  RestartSteamClient();
+                                }}
+                              >
+                                Restart Steam
                               </MenuItem>
                             )}
                           </Menu>,

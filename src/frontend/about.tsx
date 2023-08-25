@@ -18,13 +18,14 @@ import {
   TaskType,
   UpdaterState,
 } from "../types";
+import { error } from "../utils/logger";
 
 export default function About({
   appState,
   socket,
 }: {
-  appState: AppState;
-  socket: WebSocket;
+  appState: AppState | undefined;
+  socket: WebSocket | undefined;
 }) {
   return (
     <DialogBody>
@@ -51,41 +52,46 @@ function SystemInformation({
   appState,
   socket,
 }: {
-  appState: AppState;
-  socket: WebSocket;
+  appState: AppState | undefined;
+  socket: WebSocket | undefined;
 }) {
   return (
     <Focusable style={{ display: "flex", flexDirection: "column" }}>
-      <Field
-        label={"Compatibility Tools Updates"}
-        description={
-          "Last checked: " +
-          (appState.updater_last_check != null
-            ? formatDistanceToNow(fromUnixTime(appState.updater_last_check!)) +
-              " ago"
-            : "Never")
-        }
-        bottomSeparator={"none"}
-      >
-        <DialogButton
-          disabled={appState.updater_state == UpdaterState.Checking}
-          onClick={() => {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-              const response: Request = {
-                type: RequestType.Task,
-                task: {
-                  type: TaskType.CheckForFlavorUpdates,
-                },
-              };
-              socket.send(JSON.stringify(response));
-            }
-          }}
+      {appState != undefined && socket != undefined && (
+        <Field
+          label={"Compatibility Tools Updates"}
+          description={
+            "Last checked: " +
+            (appState.updater_last_check != null
+              ? formatDistanceToNow(
+                  fromUnixTime(appState.updater_last_check!),
+                ) + " ago"
+              : "Never")
+          }
+          bottomSeparator={"none"}
         >
-          {appState.updater_state == UpdaterState.Idle
-            ? "Check For Updates"
-            : "Checking..."}
-        </DialogButton>
-      </Field>
+          <DialogButton
+            disabled={appState.updater_state == UpdaterState.Checking}
+            onClick={() => {
+              if (socket && socket.readyState === WebSocket.OPEN) {
+                const response: Request = {
+                  type: RequestType.Task,
+                  task: {
+                    type: TaskType.CheckForFlavorUpdates,
+                  },
+                };
+                socket.send(JSON.stringify(response));
+              } else {
+                error("WebSocket not alive...");
+              }
+            }}
+          >
+            {appState.updater_state == UpdaterState.Idle
+              ? "Check For Updates"
+              : "Checking..."}
+          </DialogButton>
+        </Field>
+      )}
     </Focusable>
   );
 }

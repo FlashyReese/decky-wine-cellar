@@ -16,7 +16,7 @@ export const setupToasts = (serverAPI: ServerAPI): void => {
     const uniqueId = uuidv4(); // Generate a unique identifier using UUID
 
     socket.onopen = (): void => {
-      log("WebSocket connected. Unique Identifier:", uniqueId);
+      log("WebSocket connection established. Unique Identifier: ", uniqueId);
     };
 
     socket.onmessage = (e: MessageEvent): void => {
