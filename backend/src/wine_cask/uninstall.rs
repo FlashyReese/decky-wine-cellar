@@ -71,7 +71,6 @@ impl WineCask {
 
         // Update the app state to reflect the uninstalled tool and broadcast changes
         self.sync_backend_with_installed_compat_tools().await;
-        self.check_for_flavor_updates(peer_map, false).await;
         self.broadcast_app_state(peer_map).await;
     }
 }
