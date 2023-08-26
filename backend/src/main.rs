@@ -174,7 +174,6 @@ async fn initialize_app_state(wine_cask: &WineCask) {
         .lock()
         .await
         .installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
-    //wine_cask.app_state.lock().await.flavors = wine_cask.get_flavors(false).await;
 }
 
 async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap) {

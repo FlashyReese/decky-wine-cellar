@@ -73,5 +73,5 @@ export function RegisterForShutdownStart(action: () => void): any {
  * Restarts the Steam client.
  */
 export function RestartSteamClient(): void {
-  SteamClient.User.Restart();
+  SteamClient.User.StartRestart();
 }
