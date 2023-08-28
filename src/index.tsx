@@ -8,10 +8,10 @@ import {
   staticClasses,
 } from "decky-frontend-lib";
 import { VFC } from "react";
-import { FaShip } from "react-icons/fa";
 
 import ManagePage from "./frontend";
 import { forceCloseToastsWebSocket, setupToasts } from "./utils/toasts";
+import { GiCellarBarrels } from "react-icons/gi";
 
 const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
   return (
@@ -40,7 +40,7 @@ export default definePlugin((serverApi: ServerAPI) => {
   return {
     title: <div className={staticClasses.Title}>Wine Cellar</div>,
     content: <Content serverAPI={serverApi} />,
-    icon: <FaShip />,
+    icon: <GiCellarBarrels />,
     onDismount() {
       forceCloseToastsWebSocket();
       serverApi.routerHook.removeRoute("/wine-cellar");
