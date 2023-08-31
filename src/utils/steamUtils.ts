@@ -65,16 +65,12 @@ export interface InstallFolder {
 }
 
 /**
- * Retrieves a list of available compatibility tools for a specific application.
- * @param appId The ID of the application to retrieve compatibility tools for.
+ * Retrieves a list of available compatibility tools for all applications.
  * @returns A Promise that resolves to an array of CompatToolInfo objects.
  */
-export async function GetAvailableCompatTools(
-  appId: number,
-): Promise<CompatToolInfo[]> {
+export async function GetGlobalCompatTools(): Promise<CompatToolInfo[]> {
   try {
-    // Call SteamClient's method to get available compatibility tools for the specified app
-    const response = await SteamClient.Apps.GetAvailableCompatTools(appId);
+    const response = await SteamClient.Settings.GetGlobalCompatTools();
     // Map the response to CompatToolInfo objects and return as an array
     return response.map((tool: CompatToolInfo) => ({
       ...tool,

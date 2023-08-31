@@ -6,7 +6,7 @@ import { log } from "../utils/logger";
 import { v4 as uuidv4 } from "uuid";
 import FlavorTab from "./flavorTab";
 import ManagerTab from "./manager";
-import { GetAvailableCompatTools } from "../utils/steamUtils";
+import { GetGlobalCompatTools } from "../utils/steamUtils";
 import About from "./about";
 
 export default function ManagePage() {
@@ -23,7 +23,7 @@ export default function ManagePage() {
     socket.onopen = async () => {
       log("WebSocket connection established. Unique Identifier:", uniqueId); // Log the unique identifier on connection open
 
-      const tools = await GetAvailableCompatTools(0); // What app id should we use here?
+      const tools = await GetGlobalCompatTools();
 
       const response: Request = {
         type: RequestType.RequestState,
