@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use std::{fs, io};
 
 pub mod app;
@@ -55,7 +56,7 @@ fn copy_dir(source: &Path, destination: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn recursive_delete_dir_entry(entry_path: &Path) -> std::io::Result<()> {
+fn recursive_delete_dir_entry(entry_path: &Path) -> io::Result<()> {
     if entry_path.is_dir() {
         for entry in fs::read_dir(entry_path)? {
             let entry = entry?;
@@ -81,7 +82,12 @@ pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
                         .await;
                 }
             }
-            None => {}
+            None => {
+                // Introduce a short delay before the next iteration
+                // This is temporary fix for https://github.com/FlashyReese/decky-wine-cellar/issues/5, we are eating up cpu cycles with this loop
+                // Todo: Find a better solution
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
         }
     }
 }
