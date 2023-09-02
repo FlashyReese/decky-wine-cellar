@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::{env, fmt};
 
 use keyvalues_parser::Vdf;
-use log::error;
+use log::{error, info};
 use serde::Serialize;
 
 /// Represents errors that can occur while using `SteamUtil`.
@@ -58,21 +58,46 @@ impl SteamUtil {
     }
 
     /// Finds the Steam directory.
-    pub fn find_steam_directory() -> Result<PathBuf, SteamUtilError> {
-        let home_path = env::var_os("HOME")
-            .or_else(|| env::var_os("USERPROFILE"))
-            .ok_or(SteamUtilError::HomeDirectoryNotFound)
-            .map(PathBuf::from)?;
-        let steam_home = home_path.join(".steam");
-        if steam_home.exists() {
-            Ok(steam_home)
+    pub fn find_steam_directory(
+        user_home_directory: Option<String>,
+    ) -> Result<PathBuf, SteamUtilError> {
+        // Possible Steam root directories
+        let possible_steam_roots = [
+            ".local/share/Steam",
+            ".steam/root",
+            ".steam/steam",
+            ".steam/debian-installation",
+            ".var/app/com.valvesoftware.Steam/data/Steam", // flatpak
+        ];
+
+        let user_profile = user_home_directory.map(PathBuf::from).or_else(|| {
+            env::var_os("USERPROFILE")
+                .map(PathBuf::from)
+                .or_else(|| env::var_os("HOME").map(PathBuf::from))
+        });
+
+        if let Some(user_profile) = user_profile {
+            info!("Looking for Steam directory in {}", user_profile.display());
+            for steam_dir in &possible_steam_roots {
+                let expanded_steam_dir = user_profile.join(steam_dir);
+                let ct_dir = expanded_steam_dir.join("config");
+                let config_vdf = ct_dir.join("config.vdf");
+                let libraryfolders_vdf = ct_dir.join("libraryfolders.vdf");
+
+                if config_vdf.exists() && libraryfolders_vdf.exists() {
+                    info!("Found Steam directory: {}", expanded_steam_dir.display());
+                    return Ok(expanded_steam_dir);
+                }
+            }
         } else {
-            Err(SteamUtilError::SteamDirectoryNotFound)
+            return Err(SteamUtilError::HomeDirectoryNotFound);
         }
+
+        Err(SteamUtilError::SteamDirectoryNotFound)
     }
 
     pub fn find() -> Result<Self, SteamUtilError> {
-        match SteamUtil::find_steam_directory() {
+        match SteamUtil::find_steam_directory(None) {
             Ok(steam_home) => Ok(Self {
                 steam_path: steam_home,
             }),
@@ -81,7 +106,7 @@ impl SteamUtil {
     }
 
     pub fn get_steam_compatibility_tools_directory(&self) -> PathBuf {
-        self.steam_path.join("root").join("compatibilitytools.d")
+        self.steam_path.join("compatibilitytools.d")
     }
 
     pub fn read_compatibility_tool_from_vdf_path(
@@ -180,11 +205,7 @@ impl SteamUtil {
     }
 
     pub fn get_compatibility_tools_mappings(&self) -> Result<HashMap<u64, String>, SteamUtilError> {
-        let steam_config_file = self
-            .steam_path
-            .join("root")
-            .join("config")
-            .join("config.vdf");
+        let steam_config_file = self.steam_path.join("config").join("config.vdf");
 
         if !steam_config_file.exists() {
             return Err(SteamUtilError::SteamConfigVdfNotFound);
@@ -252,17 +273,13 @@ impl SteamUtil {
 
     /// Lists library folders.
     pub fn list_library_folders(&self) -> Result<Vec<PathBuf>, SteamUtilError> {
-        let steam_apps_directory = self.steam_path.join("root").join("steamapps");
+        let steam_apps_directory = self.steam_path.join("steamapps");
 
         if !steam_apps_directory.exists() {
             return Err(SteamUtilError::SteamAppsDirectoryNotFound);
         }
 
-        let library_folders_vdf_file = self
-            .steam_path
-            .join("root")
-            .join("steamapps")
-            .join("libraryfolders.vdf");
+        let library_folders_vdf_file = self.steam_path.join("steamapps").join("libraryfolders.vdf");
 
         if !library_folders_vdf_file.exists() {
             return Err(SteamUtilError::LibraryFoldersVdfNotFound);
@@ -556,7 +573,7 @@ mod tests {
     fn test_list_compatibility_tools() {
         // Create emulated Steam directory for the test
         let steam_dir = create_test_steam_directory();
-        let steam_util = SteamUtil::new(steam_dir.path().to_path_buf());
+        let steam_util = SteamUtil::new(steam_dir.path().join("root").to_path_buf());
 
         let result = steam_util.list_compatibility_tools();
         assert!(result.is_ok());
@@ -570,7 +587,7 @@ mod tests {
     fn test_get_compatibility_tools_mappings() {
         // Create emulated Steam directory for the test
         let steam_dir = create_test_steam_directory();
-        let steam_util = SteamUtil::new(steam_dir.path().to_path_buf());
+        let steam_util = SteamUtil::new(steam_dir.path().join("root").to_path_buf());
 
         let result = steam_util.get_compatibility_tools_mappings();
         assert!(result.is_ok());
@@ -582,7 +599,7 @@ mod tests {
     fn test_list_installed_games() {
         // Create emulated Steam directory for the test
         let steam_dir = create_test_steam_directory();
-        let steam_util = SteamUtil::new(steam_dir.path().to_path_buf());
+        let steam_util = SteamUtil::new(steam_dir.path().join("root").to_path_buf());
 
         let result = steam_util.list_installed_games();
         assert!(result.is_ok());

@@ -152,18 +152,13 @@ fn get_server_address() -> String {
 fn get_steam_directory() -> PathBuf {
     match env::var("DECKY_USER_HOME") {
         Ok(value) => {
-            let steam = PathBuf::from(value).join(".steam");
-            if steam.exists() {
-                steam
-            } else {
-                SteamUtil::find_steam_directory().unwrap() // Todo: Handle if no steam folder is found, although this should never happen
-            }
+            SteamUtil::find_steam_directory(Some(value)).unwrap() // Todo: Handle if no steam folder is found, although this should never happen
         }
         Err(_) => {
             error!(
                 "Couldn't find environment variable DECKY_USER_HOME, using default steam directory"
             );
-            SteamUtil::find_steam_directory().unwrap()
+            SteamUtil::find_steam_directory(None).unwrap()
         }
     }
 }
