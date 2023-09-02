@@ -133,12 +133,32 @@ async fn handle_connection(
 }
 
 fn configure_logger() -> Result<(), IoError> {
-    let path =
-        env::var("DECKY_PLUGIN_LOG").unwrap_or_else(|_| "/tmp/decky-wine-cellar.log".to_string());
+    // Check for DECKY_PLUGIN_LOG environment variable
+    let log_path = match env::var("DECKY_PLUGIN_LOG") {
+        Ok(path) => path,
+        Err(_) => {
+            // If DECKY_PLUGIN_LOG is not found, check for DECKY_PLUGIN_LOG_DIR
+            match env::var("DECKY_PLUGIN_LOG_DIR") {
+                Ok(log_dir) => {
+                    // Create the log directory if it doesn't exist
+                    format!("{}/wine-cask.log", log_dir)
+                }
+                Err(_) => {
+                    // If neither variable is set, use the /tmp directory
+                    "/tmp/decky-wine-cellar.log".to_string()
+                }
+            }
+        }
+    };
 
-    let target = OpenOptions::new().create(true).append(true).open(path)?;
+    let target = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
 
     MultiLogger::init(target, Level::Info).expect("Could not configure logger");
+
+    info!("Logging to: {}", log_path);
 
     Ok(())
 }
@@ -152,6 +172,7 @@ fn get_server_address() -> String {
 fn get_steam_directory() -> PathBuf {
     match env::var("DECKY_USER_HOME") {
         Ok(value) => {
+            info!("Using DECKY_USER_HOME: {}", value);
             SteamUtil::find_steam_directory(Some(value)).unwrap() // Todo: Handle if no steam folder is found, although this should never happen
         }
         Err(_) => {
