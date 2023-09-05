@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::{env, fmt};
 
 use keyvalues_parser::Vdf;
-use log::{error, info};
+use log::{error, info, warn};
 use serde::Serialize;
 
 /// Represents errors that can occur while using `SteamUtil`.
@@ -16,8 +16,8 @@ pub enum SteamUtilError {
     HomeDirectoryNotFound,
     /// The steam directory could not be found.
     SteamDirectoryNotFound,
-    /// The compatibility tools directory could not be found.
-    CompatibilityToolsDirectoryNotFound,
+    /// The compatibility tools directory could not be created.
+    CompatibilityToolsDirectoryCreationFailed,
     /// The steam applications directory could not be found.
     SteamAppsDirectoryNotFound,
     /// The library folders vdf could not be found.
@@ -63,6 +63,7 @@ impl SteamUtil {
     ) -> Result<PathBuf, SteamUtilError> {
         // Possible Steam root directories
         let possible_steam_roots = [
+            // todo: handle multiple installations perhaps a dropdown in frontend if we detect multiple installation
             ".local/share/Steam",
             ".steam/root",
             ".steam/steam",
@@ -81,8 +82,8 @@ impl SteamUtil {
             for steam_dir in &possible_steam_roots {
                 let expanded_steam_dir = user_profile.join(steam_dir);
                 let ct_dir = expanded_steam_dir.join("config");
-                let config_vdf = ct_dir.join("config.vdf");
-                let libraryfolders_vdf = ct_dir.join("libraryfolders.vdf");
+                let config_vdf = ct_dir.join("config.vdf"); // this does exist on clean install
+                let libraryfolders_vdf = ct_dir.join("libraryfolders.vdf"); // On a clean install doesn't exist, it's generated after login
 
                 if config_vdf.exists() && libraryfolders_vdf.exists() {
                     info!("Found Steam directory: {}", expanded_steam_dir.display());
@@ -106,7 +107,14 @@ impl SteamUtil {
     }
 
     pub fn get_steam_compatibility_tools_directory(&self) -> PathBuf {
-        self.steam_path.join("compatibilitytools.d")
+        let path = self.steam_path.join("compatibilitytools.d"); // Apparently this is not created by default
+        if !path.exists() && self.steam_path.exists() {
+            warn!("Steam compatibility tools directory does not exist, creating it...");
+            fs::create_dir(&path)
+                .map_err(|_err| SteamUtilError::CompatibilityToolsDirectoryCreationFailed)
+                .unwrap();
+        }
+        return path;
     }
 
     pub fn read_compatibility_tool_from_vdf_path(
@@ -184,12 +192,8 @@ impl SteamUtil {
 
     pub fn list_compatibility_tools(&self) -> Result<Vec<CompatibilityTool>, SteamUtilError> {
         let compatibility_tools_directory = self.get_steam_compatibility_tools_directory();
-        if !compatibility_tools_directory.exists() {
-            return Err(SteamUtilError::CompatibilityToolsDirectoryNotFound);
-        }
 
         let compat_tools: Vec<CompatibilityTool> = fs::read_dir(&compatibility_tools_directory)
-            .map_err(|_err| SteamUtilError::CompatibilityToolsDirectoryNotFound)
             .unwrap()
             .filter_map(Result::ok)
             .filter(|x| {
@@ -396,8 +400,11 @@ impl Display for SteamUtilError {
         match self {
             SteamUtilError::HomeDirectoryNotFound => write!(f, "Home directory not found"),
             SteamUtilError::SteamDirectoryNotFound => write!(f, "Steam directory not found"),
-            SteamUtilError::CompatibilityToolsDirectoryNotFound => {
-                write!(f, "Steam compatibility tools directory not found")
+            SteamUtilError::CompatibilityToolsDirectoryCreationFailed => {
+                write!(
+                    f,
+                    "Steam compatibility tools directory could not be created!"
+                )
             }
             SteamUtilError::SteamAppsDirectoryNotFound => {
                 write!(f, "Steam apps directory not found")
