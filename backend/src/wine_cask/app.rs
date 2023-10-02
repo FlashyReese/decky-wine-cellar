@@ -21,6 +21,7 @@ pub struct WineCask {
 pub struct AppState {
     pub available_flavors: Vec<Flavor>,
     pub installed_compatibility_tools: Vec<SteamCompatibilityTool>,
+    pub installed_applications: Vec<u64>,
     pub in_progress: Option<QueueCompatibilityTool>,
     pub task_queue: VecDeque<Task>,
     pub updater_state: UpdaterState,
@@ -165,11 +166,8 @@ impl WineCask {
             });
         let installed_games = self
             .steam_util
-            .list_installed_games()
-            .unwrap_or_else(|err| {
-                warn!("Failed to get list of installed games: {}", err);
-                Vec::new()
-            });
+            .list_installed_applications()
+            .expect("Failed to get list of installed games");
         let used_by_games: Vec<String> = installed_games
             .iter()
             .filter(|game| {
@@ -225,6 +223,15 @@ impl WineCask {
         Some(compatibility_tools)
     }
 
+    pub fn list_installed_applications(&self) -> Vec<u64> {
+        self.steam_util
+            .list_installed_applications()
+            .expect("Failed to get list of installed applications")
+            .iter()
+            .map(|app| app.app_id)
+            .collect()
+    }
+
     pub async fn process_frontend_compat_tools_update(
         &self,
         peer_map: &PeerMap,
@@ -240,6 +247,7 @@ impl WineCask {
     pub async fn sync_backend_with_installed_compat_tools(&self) {
         let mut app_state = self.app_state.lock().await;
         app_state.installed_compatibility_tools = self.list_compatibility_tools().unwrap();
+        app_state.installed_applications = self.list_installed_applications();
 
         let available_compat_tools = app_state.available_compat_tools.clone().unwrap();
 

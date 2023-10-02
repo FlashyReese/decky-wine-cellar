@@ -26,4 +26,8 @@ export class BackendCtx {
   static async commitSettings() {
     return await this.bridge("settings_commit");
   }
+
+  static async restartBackend() {
+    return await this.bridge("restart_backend");
+  }
 }

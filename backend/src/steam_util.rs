@@ -45,7 +45,7 @@ pub struct CompatibilityTool {
     pub to_os_list: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, PartialEq)]
 pub struct SteamApp {
     pub app_id: u64,
     pub name: String,
@@ -225,6 +225,76 @@ impl SteamUtil {
         Ok(compat_tools)
     }
 
+    //todo: check steamapps/common/*/toolmanifest.vdf for proton
+    pub fn list_installed_applications_by_userdata(&self) -> Result<Vec<SteamApp>, SteamUtilError> {
+        let steam_userdata_directory = self.steam_path.join("userdata");
+
+        if !steam_userdata_directory.exists() {
+            //return Err(SteamUtilError::SteamAppsDirectoryNotFound);
+        }
+        let mut installed_userdata: Vec<SteamApp> = Vec::new();
+
+        let installed = self.list_installed_applications()?;
+
+        fs::read_dir(&steam_userdata_directory)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|x| {
+                x.metadata().unwrap().is_dir()
+                    && x.path().join("config").join("localconfig.vdf").exists()
+            })
+            .map(|x| x.path().join("config").join("localconfig.vdf"))
+            .for_each(|x| {
+                if let Ok(local_config) = fs::read_to_string(&x) {
+                    if let Ok(local_config_vdf) = Vdf::parse(&local_config) {
+                        let software_vdf_obj = local_config_vdf
+                            .value
+                            .get_obj()
+                            .unwrap()
+                            .get("Software")
+                            .unwrap()
+                            .get(0)
+                            .unwrap()
+                            .get_obj()
+                            .unwrap();
+                        let steam = software_vdf_obj
+                            .get("Valve")
+                            .or(software_vdf_obj.get("valve"))
+                            .unwrap()
+                            .get(0)
+                            .unwrap()
+                            .get_obj()
+                            .unwrap()
+                            .get("Steam")
+                            .unwrap()
+                            .get(0)
+                            .unwrap()
+                            .get_obj()
+                            .unwrap();
+                        let apps = steam
+                            .get("Apps")
+                            .or(steam.get("apps"))
+                            .unwrap()
+                            .get(0)
+                            .unwrap()
+                            .get_obj()
+                            .unwrap();
+                        for key in apps.keys() {
+                            let key: u64 = key.parse().unwrap();
+                            if let Some(app) = installed
+                                .iter()
+                                .find(|app| app.app_id == key && !installed_userdata.contains(app))
+                            {
+                                installed_userdata.push(app.clone());
+                            }
+                        }
+                    }
+                }
+            });
+
+        Ok(installed_userdata)
+    }
+
     pub fn get_compatibility_tools_mappings(&self) -> Result<HashMap<u64, String>, SteamUtilError> {
         let steam_config_file = self.steam_path.join("config").join("config.vdf");
 
@@ -340,9 +410,11 @@ impl SteamUtil {
         Ok(library_folders)
     }
 
-    /// Lists the installed games across all library folders.
-    pub fn list_installed_games(&self) -> Result<Vec<SteamApp>, SteamUtilError> {
+    /// Lists the installed applications across all library folders.
+    pub fn list_installed_applications(&self) -> Result<Vec<SteamApp>, SteamUtilError> {
         // todo: problem is this function can also return partial results because one library folder might be broken but the others might still work properly
+        // todo: this lists everything in the library folders, not just games. We can probably use `appStore.allApps` or get app list from ~/.steam/root/userdata/*/config/localconfig.vdf
+        // UserLocalConfigStore -> Software -> Valve -> Steam -> apps/Apps then match with acf files
         let mut apps: Vec<SteamApp> = Vec::new();
         match self.list_library_folders() {
             Ok(library_folders) => {
@@ -355,7 +427,7 @@ impl SteamUtil {
                         );
                         continue;
                     }
-                    match &mut self.find_installed_games(library_folder.clone()) {
+                    match &mut self.find_installed_application(library_folder.clone()) {
                         Ok(steam_apps) => apps.append(steam_apps),
                         Err(err) => {
                             error!(
@@ -376,7 +448,7 @@ impl SteamUtil {
         Ok(apps)
     }
 
-    pub fn find_installed_games(
+    pub fn find_installed_application(
         &self,
         steam_apps_directory: PathBuf,
     ) -> Result<Vec<SteamApp>, SteamUtilError> {
@@ -635,7 +707,7 @@ mod tests {
         let steam_dir = create_test_steam_directory();
         let steam_util = SteamUtil::new(steam_dir.path().join("root").to_path_buf());
 
-        let result = steam_util.list_installed_games();
+        let result = steam_util.list_installed_applications();
         assert!(result.is_ok());
         let installed_games = result.unwrap();
         assert_eq!(installed_games.len(), 2);

@@ -27,3 +27,13 @@ export const error = (...args: any[]) => {
     ...args,
   );
 };
+
+export const warn = (...args: any[]) => {
+  console.warn(
+      `%c Decky %c Wine Cellar %c`,
+      "background: #16a085; color: black;",
+      "background: #FFA500;",
+      "background: transparent;",
+      ...args,
+  );
+};

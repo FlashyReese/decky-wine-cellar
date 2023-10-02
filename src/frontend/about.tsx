@@ -6,6 +6,7 @@ import {
   Field,
   Focusable,
   Navigation,
+
 } from "decky-frontend-lib";
 import { SiDiscord, SiGithub, SiKofi } from "react-icons/si";
 import { HiOutlineQrCode } from "react-icons/hi2";
@@ -18,7 +19,10 @@ import {
   TaskType,
   UpdaterState,
 } from "../types";
-import { error } from "../utils/logger";
+import {error, log, warn} from "../utils/logger";
+import PortNumberTextField from "../components/PortNumberTextField";
+import { BackendCtx } from "../utils/pythonBackendHelper";
+import { useEffect, useState } from "react";
 
 export default function About({
   appState,
@@ -27,18 +31,64 @@ export default function About({
   appState: AppState | undefined;
   socket: WebSocket | undefined;
 }) {
+  const [portNumber, setPortNumber] = useState<number>(8887);
+
+  useEffect(() => {
+    // Load the initial port number from your backend context
+    const loadPortNumber = async () => {
+      try {
+        const initialPortNumber = (await BackendCtx.getSetting(
+          "port",
+          8887,
+        )) as number;
+        setPortNumber(initialPortNumber);
+      } catch (error) {
+        // Handle the error, e.g., log it or set a default value
+        console.error("Error loading port number:", error);
+        setPortNumber(8887);
+      }
+    };
+
+    loadPortNumber().then(() => {
+      console.log("Port number loaded");
+    });
+  }, []);
+
   return (
     <DialogBody>
       <DialogControlsSection>
-        <div>
-          <p>
-            Wine Cellar is a compatibility tool manager for Steam. It allows you
-            to install, uninstall, and update compatibility tools for Steam
-            games.
-          </p>
-        </div>
-        <DialogControlsSectionHeader>Wine Cellar</DialogControlsSectionHeader>
+        <Field bottomSeparator="none">
+          Wine Cellar is a compatibility tool manager for Steam. It allows you to install, uninstall, and update compatibility tools for Steam games.
+        </Field>
+        <DialogControlsSectionHeader>Wine Cellar Settings</DialogControlsSectionHeader>
         <SystemInformation appState={appState} socket={socket} />
+        <Field label={"Wine Cellar Port"}>
+          <PortNumberTextField
+            value={portNumber + ""}
+            onPortNumberChange={(port) => {
+              setPortNumber(port);
+              log("Port number changed to " + port);
+            }}
+            rangeMin={1}
+            mustBeNumeric={true}
+            style={{ minWidth: "80px" }}
+          />
+        </Field>
+        <Field label={"Restart Backend"}>
+          <DialogButton
+              onClick={() => {
+                BackendCtx.restartBackend().then(() => {
+                  warn("Backend restarted");
+                });
+              }}
+              style={{
+                padding: "10px",
+                fontSize: "14px",
+              }}
+          >
+            Restart Now
+          </DialogButton>
+        </Field>
         <DialogControlsSectionHeader>
           Engage & Participate
         </DialogControlsSectionHeader>

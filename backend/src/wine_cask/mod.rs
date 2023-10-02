@@ -86,7 +86,7 @@ pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
                 // Introduce a short delay before the next iteration
                 // This is temporary fix for https://github.com/FlashyReese/decky-wine-cellar/issues/5, we are eating up cpu cycles with this loop
                 // Todo: Find a better solution
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                tokio::time::sleep(Duration::from_millis(1)).await;
             }
         }
     }
