@@ -12,6 +12,7 @@ import { VFC } from "react";
 import ManagePage from "./frontend";
 import { forceCloseToastsWebSocket, setupToasts } from "./utils/toasts";
 import { GiCellarBarrels } from "react-icons/gi";
+import {BackendCtx} from "./utils/pythonBackendHelper";
 
 const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
   return (
@@ -36,6 +37,8 @@ export default definePlugin((serverApi: ServerAPI) => {
   serverApi.routerHook.addRoute("/wine-cellar", () => {
     return <ManagePage />;
   });
+
+  BackendCtx.initialize(serverApi);
 
   return {
     title: <div className={staticClasses.Title}>Wine Cellar</div>,

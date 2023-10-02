@@ -38,6 +38,7 @@ async fn main() -> Result<(), IoError> {
     let app_state = AsyncAppState::new(Mutex::new(AppState {
         available_flavors: Vec::new(),
         installed_compatibility_tools: Vec::new(),
+        installed_applications: Vec::new(),
         in_progress: None,
         task_queue: VecDeque::new(),
         updater_state: UpdaterState::Idle,
@@ -185,11 +186,9 @@ fn get_steam_directory() -> PathBuf {
 }
 
 async fn initialize_app_state(wine_cask: &WineCask) {
-    wine_cask
-        .app_state
-        .lock()
-        .await
-        .installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
+    let mut app_state = wine_cask.app_state.lock().await;
+    app_state.installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
+    app_state.installed_applications = wine_cask.list_installed_applications();
 }
 
 async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap) {

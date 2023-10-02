@@ -1,3 +1,6 @@
+import { AppState } from "../types";
+import { AppDetails, SteamAppOverview } from "decky-frontend-lib";
+
 /**
  * Represents information about a compatibility tool.
  */
@@ -145,4 +148,34 @@ export function RegisterForShutdownStart(action: () => void): any {
  */
 export function RestartSteamClient(): void {
   SteamClient.User.StartRestart();
+}
+
+export function GetInstalledApplications(appState: AppState): SteamApp[] {
+  let installedApps: SteamApp[] = [];
+  for (const appId of appState.installed_applications) {
+    let app: SteamAppOverview | null = window.appStore.GetAppOverviewByAppID(appId);
+    if (app && app.app_type == 1 /*Game*/) {// 2 - Application, 4 - Tool, 1073741824 - Shortcut
+      let icon = window.appStore.GetIconURLForApp(app);
+      let appData: AppData = window.appDetailsStore.GetAppData(appId);
+      const steamApp: SteamApp = {
+        appId: appId,
+        name: app.display_name,
+        icon: icon,
+        specified_tool: appData.details?.strCompatToolName || "",
+      };
+      installedApps.push(steamApp);
+    }
+  }
+  return installedApps;
+}
+
+export interface SteamApp {
+  appId: number;
+  name: string;
+  icon: string;
+  specified_tool: string;
+}
+
+export interface AppData {
+  details: AppDetails;
 }

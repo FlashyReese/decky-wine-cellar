@@ -37,13 +37,24 @@ class Plugin:
     async def _unload(self):
         if self.backend_proc is not None:
             logger.info("Killing Wine Cask (the Wine Cellar backend)...")
-            self.backend_proc.kill()
+            self.backend_proc.terminate()
+            try:
+                self.backend_proc.wait(timeout=5)  # 5 seconds timeout
+            except subprocess.TimeoutExpired:
+                self.backend_proc.kill()
+            self.backend_proc = None
         pass
 
     async def restart_backend(self):
         if self.backend_proc is not None:
             logger.info("Killing Wine Cask (the Wine Cellar backend)...")
-            self.backend_proc.kill()
+            self.backend_proc.terminate()
+            try:
+                self.backend_proc.wait(timeout=5)  # 5 seconds timeout
+            except subprocess.TimeoutExpired:
+                self.backend_proc.kill()
+            self.backend_proc = None
+        logger.info("Starting Wine Cask (the Wine Cellar backend)...")
         self.backend_proc = subprocess.Popen([PARENT_DIR + "/bin/backend"])
 
     async def settings_read(self):

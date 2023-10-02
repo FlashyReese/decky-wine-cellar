@@ -8,6 +8,8 @@ import FlavorTab from "./flavorTab";
 import ManagerTab from "./manager";
 import { GetGlobalCompatTools } from "../utils/steamUtils";
 import About from "./about";
+import GamesTab from "./games";
+
 
 export default function ManagePage() {
   const [appState, setAppState] = useState<AppState | undefined>();
@@ -65,6 +67,12 @@ export default function ManagePage() {
       title: "Dashboard",
       content: <ManagerTab appState={appState} socket={socket} />,
       route: "/wine-cellar/dashboard",
+    });
+
+    pages.push({
+      title: "Games",
+      content: <GamesTab appState={appState} socket={socket} />,
+      route: "/wine-cellar/games",
     });
 
     // Flavor pages
