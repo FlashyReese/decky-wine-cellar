@@ -2,7 +2,7 @@ import {
   DialogBody,
   DialogControlsSection,
   Dropdown,
-  DropdownOption,
+  DropdownOption, Field,
   Focusable,
 } from "decky-frontend-lib";
 import { AppState, Request, RequestType } from "../types";
@@ -23,9 +23,6 @@ export default function GamesTab({
   socket: WebSocket;
 }) {
   const [dropdownOptions, setDropdownOptions] = useState<DropdownOption[]>([]);
-  const [installedApplications, setInstalledApplications] = useState<
-    SteamApp[]
-  >([]);
 
   const RequestState = () => {
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -49,16 +46,11 @@ export default function GamesTab({
     selectedOption: DropdownOption,
   ) => {
     SpecifyCompatTool(steamApp.appId, selectedOption.data);
-    RequestState();
-    // Recall GetInstalledApplications to update the list after the change
-    fetchInstalledApplications();
-  };
 
-  const fetchInstalledApplications = () => {
-    const installedApps = GetInstalledApplications(appState);
-    console.log(JSON.stringify(installedApps));
-    // Update state with the new installed applications
-    setInstalledApplications(installedApps);
+    // Add a 500ms delay before calling RequestState, we need to wait for compat tool to be updated
+    setTimeout(() => {
+      RequestState();
+    }, 500);
   };
 
   useEffect(() => {
@@ -84,45 +76,47 @@ export default function GamesTab({
         setDropdownOptions(options);
       })
       .catch((err) => error(err));
-    fetchInstalledApplications();
   }, []);
 
   return (
     <DialogBody>
       <DialogControlsSection>
         <ul style={{ listStyleType: "none" }}>
-          {installedApplications.map((steamApp: SteamApp) => {
-            return (
-              <li
-                style={{
-                  display: "flex",
-                  flexDirection: "row",
-                  alignItems: "center",
-                  paddingBottom: "10px",
-                }}
-              >
-                <span>
-                  {steamApp.name != null ? steamApp.name : steamApp.appId}
-                </span>
-                <Focusable
+          {GetInstalledApplications(appState)
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((steamApp: SteamApp) => {
+              return (
+                <li
                   style={{
-                    marginLeft: "auto",
-                    boxShadow: "none",
                     display: "flex",
-                    justifyContent: "right",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    paddingBottom: "10px",
                   }}
                 >
-                  <Dropdown
-                    rgOptions={dropdownOptions}
-                    selectedOption={steamApp.specified_tool}
-                    onChange={(change) =>
-                      handleDropdownChange(steamApp, change)
-                    }
-                  />
-                </Focusable>
-              </li>
-            );
-          })}
+                  <Field icon={<img src={steamApp.icon} alt="Icon" />} bottomSeparator={"none"}>{steamApp.name != null ? steamApp.name : steamApp.appId}</Field>
+                  {/*<span>
+                    {steamApp.name != null ? steamApp.name + " " : steamApp.appId}
+                  </span>*/}
+                  <Focusable
+                    style={{
+                      marginLeft: "auto",
+                      boxShadow: "none",
+                      display: "flex",
+                      justifyContent: "right",
+                    }}
+                  >
+                    <Dropdown
+                      rgOptions={dropdownOptions}
+                      selectedOption={steamApp.specified_tool}
+                      onChange={(change) =>
+                        handleDropdownChange(steamApp, change)
+                      }
+                    />
+                  </Focusable>
+                </li>
+              );
+            })}
         </ul>
       </DialogControlsSection>
     </DialogBody>
