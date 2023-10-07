@@ -21,7 +21,7 @@ pub struct WineCask {
 pub struct AppState {
     pub available_flavors: Vec<Flavor>,
     pub installed_compatibility_tools: Vec<SteamCompatibilityTool>,
-    pub installed_applications: Vec<u64>,
+    pub installed_applications: Vec<SteamAppCompat>,
     pub in_progress: Option<QueueCompatibilityTool>,
     pub task_queue: VecDeque<Task>,
     pub updater_state: UpdaterState,
@@ -68,6 +68,14 @@ pub struct Request {
     pub notification: Option<String>,
     pub available_compat_tools: Option<Vec<SteamClientCompatToolInfo>>,
     pub app_state: Option<AppState>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SteamAppCompat {
+    pub app_id: u64,
+    pub display_name: String,
+    #[serde(rename = "strToolName")]
+    pub str_tool_name: Option<String>,
 }
 
 // Internal only
@@ -126,6 +134,7 @@ impl WineCask {
             app_state: Some(app_state.clone()),
         };
         drop(app_state);
+        info!("{}", serde_json::to_string_pretty(&response_new).unwrap());
         self.broadcast_message(peer_map, &response_new).await;
     }
 
@@ -154,6 +163,36 @@ impl WineCask {
                 }
             }
         }
+    }
+
+    pub fn get_steam_app_compat(&self) -> Vec<SteamAppCompat> {
+        let compat_tools_mapping = self
+            .steam_util
+            .get_compatibility_tools_mappings()
+            .expect("Failed to get compatibility tools mappings");
+        let installed_games = self
+            .steam_util
+            .list_installed_applications()
+            .expect("Failed to get list of installed games");
+        let steam_apps_compat: Vec<SteamAppCompat> = installed_games
+            .iter()
+            .filter_map(|game| {
+                if compat_tools_mapping.contains_key(&game.app_id) {
+                    let str_tool_name = compat_tools_mapping.get(&game.app_id).unwrap();
+                    return Some(SteamAppCompat {
+                        app_id: game.app_id.clone(),
+                        display_name: game.name.clone(),
+                        str_tool_name: Some(str_tool_name.clone()),
+                    });
+                }
+                Some(SteamAppCompat {
+                    app_id: game.app_id.clone(),
+                    display_name: game.name.clone(),
+                    str_tool_name: None,
+                })
+            })
+            .collect();
+        steam_apps_compat
     }
 
     fn get_used_by_games(&self, display_name: &str, internal_name: &str) -> Vec<String> {
@@ -247,7 +286,7 @@ impl WineCask {
     pub async fn sync_backend_with_installed_compat_tools(&self) {
         let mut app_state = self.app_state.lock().await;
         app_state.installed_compatibility_tools = self.list_compatibility_tools().unwrap();
-        app_state.installed_applications = self.list_installed_applications();
+        app_state.installed_applications = self.get_steam_app_compat();
 
         let available_compat_tools = app_state.available_compat_tools.clone().unwrap();
 

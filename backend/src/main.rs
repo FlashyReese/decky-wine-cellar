@@ -188,7 +188,7 @@ fn get_steam_directory() -> PathBuf {
 async fn initialize_app_state(wine_cask: &WineCask) {
     let mut app_state = wine_cask.app_state.lock().await;
     app_state.installed_compatibility_tools = wine_cask.list_compatibility_tools().unwrap();
-    app_state.installed_applications = wine_cask.list_installed_applications();
+    app_state.installed_applications = wine_cask.get_steam_app_compat();
 }
 
 async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap) {

@@ -29,12 +29,18 @@ export type Asset = {
 export type AppState = {
   available_flavors: Flavor[];
   installed_compatibility_tools: SteamCompatibilityTool[];
-  installed_applications: number[];
+  installed_applications: SteamAppCompat[];
   in_progress?: QueueCompatibilityTool;
   task_queue: Task[];
   updater_state: UpdaterState;
   updater_last_check?: number;
 };
+
+export type SteamAppCompat = {
+  app_id: number,
+  display_name: string,
+  strToolName?: string,
+}
 
 export type Task = {
   type: TaskType;

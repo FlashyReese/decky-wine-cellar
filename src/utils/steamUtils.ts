@@ -152,16 +152,15 @@ export function RestartSteamClient(): void {
 
 export function GetInstalledApplications(appState: AppState): SteamApp[] {
   let installedApps: SteamApp[] = [];
-  for (const appId of appState.installed_applications) {
-    let app: SteamAppOverview | null = window.appStore.GetAppOverviewByAppID(appId);
+  for (const steamAppCompat of appState.installed_applications) {
+    let app: SteamAppOverview | null = window.appStore.GetAppOverviewByAppID(steamAppCompat.app_id);
     if (app && app.app_type == 1 /*Game*/) {// 2 - Application, 4 - Tool, 1073741824 - Shortcut
       let icon = window.appStore.GetIconURLForApp(app);
-      let appData: AppData = window.appDetailsStore.GetAppData(appId);
       const steamApp: SteamApp = {
-        appId: appId,
-        name: app.display_name,
+        appId: steamAppCompat.app_id,
+        name: steamAppCompat.display_name,
         icon: icon,
-        specified_tool: appData.details?.strCompatToolName || "",
+        specified_tool: steamAppCompat.strToolName || "",
       };
       installedApps.push(steamApp);
     }
