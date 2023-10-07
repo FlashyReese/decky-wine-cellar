@@ -1,5 +1,5 @@
 import { AppState } from "../types";
-import { AppDetails, SteamAppOverview } from "decky-frontend-lib";
+import { SteamAppOverview } from "decky-frontend-lib";
 
 /**
  * Represents information about a compatibility tool.
@@ -173,8 +173,4 @@ export interface SteamApp {
   name: string;
   icon: string;
   specified_tool: string;
-}
-
-export interface AppData {
-  details: AppDetails;
 }

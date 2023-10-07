@@ -1,3 +1,4 @@
+mod binary_vdf_util;
 mod github_util;
 mod multilogger;
 mod steam_util;
