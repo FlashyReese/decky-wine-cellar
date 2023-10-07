@@ -1,4 +1,4 @@
-import {findModuleChild, SidebarNavigation, SidebarNavigationPage} from "decky-frontend-lib";
+import {SidebarNavigation, SidebarNavigationPage} from "decky-frontend-lib";
 
 import { useEffect, useState } from "react";
 import { AppState, Request, RequestType } from "../types";
@@ -33,17 +33,6 @@ export default function ManagePage() {
       };
 
       socket.send(JSON.stringify(response));
-      /*findModuleChild((m) => {
-        if (typeof m !== "object") return undefined;
-        for (let prop in m) {
-          if (m[prop]) {
-            if (m[prop]?.toString()?.includes("getClassName")) {
-              socket.send("Found module: " + m[prop].toString());
-            }
-          }
-        }
-        return undefined;
-      });*/
     };
 
     socket.onmessage = async (event) => {
