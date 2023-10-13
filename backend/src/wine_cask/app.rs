@@ -72,6 +72,7 @@ pub struct Request {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SteamAppCompat {
+    pub shortcut: bool,
     pub app_id: u64,
     pub display_name: String,
     #[serde(rename = "strToolName")]
@@ -170,65 +171,101 @@ impl WineCask {
             .steam_util
             .get_compatibility_tools_mappings()
             .expect("Failed to get compatibility tools mappings");
+
         let installed_games = self
             .steam_util
             .list_installed_applications()
             .expect("Failed to get list of installed games");
-        let steam_apps_compat: Vec<SteamAppCompat> = installed_games
+
+        let shortcuts = self
+            .steam_util
+            .list_shortcuts()
+            .expect("Failed to get list of shortcuts");
+
+        let mut result: Vec<SteamAppCompat> = installed_games
             .iter()
-            .filter_map(|game| {
-                if compat_tools_mapping.contains_key(&game.app_id) {
-                    let str_tool_name = compat_tools_mapping.get(&game.app_id).unwrap();
-                    return Some(SteamAppCompat {
-                        app_id: game.app_id.clone(),
-                        display_name: game.name.clone(),
-                        str_tool_name: Some(str_tool_name.clone()),
-                    });
-                }
-                Some(SteamAppCompat {
-                    app_id: game.app_id.clone(),
+            .map(|game| {
+                let str_tool_name = compat_tools_mapping.get(&game.app_id);
+                SteamAppCompat {
+                    shortcut: false,
+                    app_id: game.app_id,
                     display_name: game.name.clone(),
-                    str_tool_name: None,
-                })
+                    str_tool_name: str_tool_name.cloned(),
+                }
             })
             .collect();
-        steam_apps_compat
+
+        result.extend(shortcuts.iter().map(|game| {
+            let str_tool_name = compat_tools_mapping.get(&game.app_id);
+            SteamAppCompat {
+                shortcut: true,
+                app_id: game.app_id,
+                display_name: game.name.clone(),
+                str_tool_name: str_tool_name.cloned(),
+            }
+        }));
+
+        result
     }
 
-    fn get_used_by_games(&self, display_name: &str, internal_name: &str) -> Vec<String> {
+    fn get_used_by_applications_and_shortcuts(
+        &self,
+        display_name: &str,
+        internal_name: &str,
+    ) -> Vec<String> {
         let compat_tools_mapping = self
             .steam_util
             .get_compatibility_tools_mappings()
-            .unwrap_or_else(|err| {
-                warn!("Failed to get compatibility tools mappings: {}", err);
-                HashMap::new()
-            });
+            .expect("Failed to get compatibility tools mappings");
+
         let installed_games = self
             .steam_util
             .list_installed_applications()
             .expect("Failed to get list of installed games");
-        let used_by_games: Vec<String> = installed_games
+
+        let shortcuts = self
+            .steam_util
+            .list_shortcuts()
+            .expect("Failed to get list of shortcuts");
+
+        let mut result: Vec<String> = installed_games
             .iter()
-            .filter(|game| {
-                compat_tools_mapping.contains_key(&game.app_id)
-                    && (compat_tools_mapping
-                        .get(&game.app_id)
-                        .unwrap()
-                        .eq(display_name)
-                        || compat_tools_mapping
-                            .get(&game.app_id)
-                            .unwrap()
-                            .eq(internal_name))
+            .filter_map(|game| {
+                let tool_name = compat_tools_mapping.get(&game.app_id);
+                if let Some(name) = tool_name {
+                    if name.eq(display_name) || name.eq(internal_name) {
+                        Some(game.name.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             })
-            .map(|game| game.name.clone())
             .collect();
-        used_by_games
+
+        result.extend(shortcuts.iter().filter_map(|shortcut| {
+            let tool_name = compat_tools_mapping.get(&shortcut.app_id);
+            if let Some(name) = tool_name {
+                if name.eq(display_name) || name.eq(internal_name) {
+                    Some(shortcut.name.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }));
+
+        result
     }
 
     pub async fn update_used_by_games(&self, peer_map: &PeerMap) {
         for compat_tool in &mut self.app_state.lock().await.installed_compatibility_tools {
-            compat_tool.used_by_games =
-                self.get_used_by_games(&compat_tool.display_name, &compat_tool.internal_name);
+            compat_tool.used_by_games = self.get_used_by_applications_and_shortcuts(
+                &compat_tool.display_name,
+                &compat_tool.internal_name,
+            );
         }
         self.broadcast_app_state(peer_map).await;
     }
@@ -242,8 +279,10 @@ impl WineCask {
         let mut compatibility_tools: Vec<SteamCompatibilityTool> = Vec::new();
 
         for compat_tool in &compat_tools {
-            let used_by_games: Vec<String> =
-                self.get_used_by_games(&compat_tool.display_name, &compat_tool.internal_name);
+            let used_by_games: Vec<String> = self.get_used_by_applications_and_shortcuts(
+                &compat_tool.display_name,
+                &compat_tool.internal_name,
+            );
             //let metadata = self.lookup_virtual_compatibility_tool_metadata(compat_tool);
             compatibility_tools.push(SteamCompatibilityTool {
                 path: compat_tool.path.to_string_lossy().to_string(),
