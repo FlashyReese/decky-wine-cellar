@@ -2,9 +2,12 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs;
+use std::fs::File;
+use std::io::{Cursor, Read};
 use std::path::PathBuf;
 use std::{env, fmt};
 
+use crate::vdf_util::binary_to_json;
 use keyvalues_parser::Vdf;
 use log::{error, info, warn};
 use serde::Serialize;
@@ -47,6 +50,7 @@ pub struct CompatibilityTool {
 
 #[derive(Serialize, Clone, PartialEq)]
 pub struct SteamApp {
+    pub shortcut: bool,
     pub app_id: u64,
     pub name: String,
 }
@@ -410,6 +414,67 @@ impl SteamUtil {
         Ok(library_folders)
     }
 
+    pub fn list_shortcuts(&self) -> Result<Vec<SteamApp>, SteamUtilError> {
+        let mut apps: Vec<SteamApp> = Vec::new();
+
+        let users_folder = self.steam_path.join("userdata");
+
+        if let Ok(entries) = fs::read_dir(&users_folder) {
+            for entry in entries.flatten() {
+                if !entry.file_type().unwrap().is_dir() {
+                    continue;
+                }
+
+                let user_directory = entry.path();
+                let shortcuts_file = user_directory.join("config").join("shortcuts.vdf");
+
+                if !shortcuts_file.exists() {
+                    continue;
+                }
+
+                let mut binary_data = Vec::new();
+                match File::open(shortcuts_file) {
+                    Ok(mut file) => {
+                        if let Err(err) = file.read_to_end(&mut binary_data) {
+                            eprintln!("Failed to read file: {:?}", err);
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("Failed to open file: {:?}", err);
+                    }
+                }
+
+                let mut cursor = Cursor::new(binary_data);
+
+                match binary_to_json(&mut cursor) {
+                    Ok(json_value) => {
+                        let result: Vec<SteamApp> = json_value
+                            .get("shortcuts")
+                            .unwrap()
+                            .as_object()
+                            .unwrap()
+                            .values()
+                            .map(|f| {
+                                let app_name = f.get("AppName").unwrap().as_str().unwrap();
+                                let app_id = f.get("appid").unwrap().as_u64().unwrap();
+                                SteamApp {
+                                    shortcut: true,
+                                    app_id,
+                                    name: app_name.to_string(),
+                                }
+                            })
+                            .collect();
+                        apps.extend(result);
+                    }
+                    Err(err) => {
+                        eprintln!("Failed to convert binary to JSON: {:?}", err);
+                    }
+                }
+            }
+        }
+        Ok(apps)
+    }
+
     /// Lists the installed applications across all library folders.
     pub fn list_installed_applications(&self) -> Result<Vec<SteamApp>, SteamUtilError> {
         // todo: problem is this function can also return partial results because one library folder might be broken but the others might still work properly
@@ -489,7 +554,7 @@ impl SteamUtil {
             .and_then(|f| f.get_str())
             .and_then(|f| Option::from(f.to_string()))
             .ok_or_else(|| SteamUtilError::VdfMissingEntry("name".to_string()))?;
-        Ok(SteamApp { app_id, name })
+        Ok(SteamApp { shortcut: false, app_id, name })
     }
 }
 
@@ -537,12 +602,49 @@ mod tests {
         let config_dir = root_dir.join("config");
         let config_file = config_dir.join("config.vdf");
         let steamapps_dir = root_dir.join("steamapps");
+        let userdata_dir = root_dir.join("userdata");
 
         // Create necessary directories
         fs::create_dir_all(&compatibility_tools_dir)
             .expect("Failed to create compatibility tools directory");
         fs::create_dir_all(&config_dir).expect("Failed to create config directory");
         fs::create_dir_all(&steamapps_dir).expect("Failed to create steamapps directory");
+        fs::create_dir_all(&userdata_dir).expect("Failed to create user data directory");
+
+        // Create shortcuts file
+        let user_dir = userdata_dir.join("1234567890");
+        let user_config_dir = user_dir.join("config");
+        fs::create_dir_all(&user_config_dir).expect("Failed to create user config directory");
+        let shortcuts_vdf = user_config_dir.join("shortcuts.vdf");
+        let shortcuts_binary: Vec<u8> = vec![
+            0x00, 0x73, 0x68, 0x6f, 0x72, 0x74, 0x63, 0x75, 0x74, 0x73, 0x00, 0x00, 0x30, 0x00,
+            0x02, 0x61, 0x70, 0x70, 0x69, 0x64, 0x00, 0x61, 0x6e, 0x4b, 0xd5, 0x01, 0x41, 0x70,
+            0x70, 0x4e, 0x61, 0x6d, 0x65, 0x00, 0x41, 0x6e, 0x20, 0x41, 0x6e, 0x69, 0x6d, 0x65,
+            0x20, 0x47, 0x61, 0x6d, 0x65, 0x20, 0x4c, 0x61, 0x75, 0x6e, 0x63, 0x68, 0x65, 0x72,
+            0x00, 0x01, 0x45, 0x78, 0x65, 0x00, 0x22, 0x61, 0x6e, 0x2d, 0x61, 0x6e, 0x69, 0x6d,
+            0x65, 0x2d, 0x67, 0x61, 0x6d, 0x65, 0x2d, 0x6c, 0x61, 0x75, 0x6e, 0x63, 0x68, 0x65,
+            0x72, 0x22, 0x00, 0x01, 0x53, 0x74, 0x61, 0x72, 0x74, 0x44, 0x69, 0x72, 0x00, 0x2e,
+            0x2f, 0x00, 0x01, 0x69, 0x63, 0x6f, 0x6e, 0x00, 0x00, 0x01, 0x53, 0x68, 0x6f, 0x72,
+            0x74, 0x63, 0x75, 0x74, 0x50, 0x61, 0x74, 0x68, 0x00, 0x2f, 0x75, 0x73, 0x72, 0x2f,
+            0x73, 0x68, 0x61, 0x72, 0x65, 0x2f, 0x61, 0x70, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74,
+            0x69, 0x6f, 0x6e, 0x73, 0x2f, 0x61, 0x6e, 0x2d, 0x61, 0x6e, 0x69, 0x6d, 0x65, 0x2d,
+            0x67, 0x61, 0x6d, 0x65, 0x2d, 0x6c, 0x61, 0x75, 0x6e, 0x63, 0x68, 0x65, 0x72, 0x2e,
+            0x64, 0x65, 0x73, 0x6b, 0x74, 0x6f, 0x70, 0x00, 0x01, 0x4c, 0x61, 0x75, 0x6e, 0x63,
+            0x68, 0x4f, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x00, 0x00, 0x02, 0x49, 0x73, 0x48,
+            0x69, 0x64, 0x64, 0x65, 0x6e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x41, 0x6c, 0x6c,
+            0x6f, 0x77, 0x44, 0x65, 0x73, 0x6b, 0x74, 0x6f, 0x70, 0x43, 0x6f, 0x6e, 0x66, 0x69,
+            0x67, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x41, 0x6c, 0x6c, 0x6f, 0x77, 0x4f, 0x76,
+            0x65, 0x72, 0x6c, 0x61, 0x79, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x4f, 0x70, 0x65,
+            0x6e, 0x56, 0x52, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x44, 0x65, 0x76, 0x6b, 0x69,
+            0x74, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x44, 0x65, 0x76, 0x6b, 0x69, 0x74, 0x47,
+            0x61, 0x6d, 0x65, 0x49, 0x44, 0x00, 0x00, 0x02, 0x44, 0x65, 0x76, 0x6b, 0x69, 0x74,
+            0x4f, 0x76, 0x65, 0x72, 0x72, 0x69, 0x64, 0x65, 0x41, 0x70, 0x70, 0x49, 0x44, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x02, 0x4c, 0x61, 0x73, 0x74, 0x50, 0x6c, 0x61, 0x79, 0x54,
+            0x69, 0x6d, 0x65, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x46, 0x6c, 0x61, 0x74, 0x70,
+            0x61, 0x6b, 0x41, 0x70, 0x70, 0x49, 0x44, 0x00, 0x00, 0x00, 0x74, 0x61, 0x67, 0x73,
+            0x00, 0x08, 0x08, 0x08, 0x08,
+        ];
+        fs::write(shortcuts_vdf, shortcuts_binary).expect("Failed to write shortcuts file");
 
         // Create compatibility tool VDF files
         let compat_tool_1_dir = compatibility_tools_dir.join("compat_tool_1");
@@ -679,7 +781,7 @@ mod tests {
     fn test_list_compatibility_tools() {
         // Create emulated Steam directory for the test
         let steam_dir = create_test_steam_directory();
-        let steam_util = SteamUtil::new(steam_dir.path().join("root").to_path_buf());
+        let steam_util = SteamUtil::new(steam_dir.path().join("root"));
 
         let result = steam_util.list_compatibility_tools();
         assert!(result.is_ok());
@@ -693,7 +795,7 @@ mod tests {
     fn test_get_compatibility_tools_mappings() {
         // Create emulated Steam directory for the test
         let steam_dir = create_test_steam_directory();
-        let steam_util = SteamUtil::new(steam_dir.path().join("root").to_path_buf());
+        let steam_util = SteamUtil::new(steam_dir.path().join("root"));
 
         let result = steam_util.get_compatibility_tools_mappings();
         assert!(result.is_ok());
@@ -705,7 +807,7 @@ mod tests {
     fn test_list_installed_games() {
         // Create emulated Steam directory for the test
         let steam_dir = create_test_steam_directory();
-        let steam_util = SteamUtil::new(steam_dir.path().join("root").to_path_buf());
+        let steam_util = SteamUtil::new(steam_dir.path().join("root"));
 
         let result = steam_util.list_installed_applications();
         assert!(result.is_ok());
@@ -713,5 +815,18 @@ mod tests {
         assert_eq!(installed_games.len(), 2);
         assert_eq!(installed_games[0].name, "Hades");
         assert_eq!(installed_games[1].name, "Counter-Strike: Global Offensive");
+    }
+
+    #[test]
+    fn test_list_shortcuts() {
+        // Create emulated Steam directory for the test
+        let steam_dir = create_test_steam_directory();
+        let steam_util = SteamUtil::new(steam_dir.path().join("root"));
+
+        let result = steam_util.list_shortcuts();
+        assert!(result.is_ok());
+        let shortcuts = result.unwrap();
+        assert_eq!(shortcuts.len(), 1);
+        assert_eq!(shortcuts[0].name, "An Anime Game Launcher");
     }
 }

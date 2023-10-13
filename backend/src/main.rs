@@ -1,7 +1,7 @@
-mod binary_vdf_util;
 mod github_util;
 mod multilogger;
 mod steam_util;
+mod vdf_util;
 mod wine_cask;
 
 use crate::multilogger::MultiLogger;
