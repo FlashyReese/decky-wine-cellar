@@ -259,13 +259,13 @@ pub fn look_for_compressed_archive(install_request: &Install) -> Option<QueueCom
     }*/
 
     let is_compressed = |asset: &Asset| {
-        asset.content_type == "application/gzip" || asset.content_type == "application/x-xz"
+        asset.content_type == "application/gzip" || asset.content_type == "application/x-xz" || asset.name.ends_with(".tar.gz") || asset.name.ends_with(".tar.xz")
     };
 
     let compress_type = |asset: &Asset| {
-        if asset.content_type == "application/gzip" {
+        if asset.content_type == "application/gzip" || asset.name.ends_with(".tar.gz") {
             CompressionType::Gzip
-        } else if asset.content_type == "application/x-xz" {
+        } else if asset.content_type == "application/x-xz" || asset.name.ends_with(".tar.xz") {
             CompressionType::Xz
         } else {
             CompressionType::Unknown
