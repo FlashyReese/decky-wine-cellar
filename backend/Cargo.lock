@@ -1497,7 +1497,7 @@ checksum = "d419259aba16b663966e29e6d7c6ecfa0bb8425818bb96f6f1f3c3eb71a6e7b9"
 
 [[package]]
 name = "wine-cask"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "bytes",
  "chrono",
