@@ -26,6 +26,8 @@ pub enum SteamUtilError {
     SteamConfigVdfNotFound,
     /// Vdf parsing error, that returns a string with the error.
     VdfParsingError(String),
+    /// Missing Vdf Entry
+    VdfMissingEntry(String),
 }
 
 /// Utility for working with Steam directories and settings.
@@ -122,30 +124,31 @@ impl SteamUtil {
         compat_tool_vdf: &PathBuf,
     ) -> Result<CompatibilityTool, SteamUtilError> {
         let vdf_text = fs::read_to_string(compat_tool_vdf)
-            .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))
-            .unwrap();
+            .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))?;
         let vdf = Vdf::parse(&vdf_text)
-            .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))
-            .unwrap();
+            .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))?;
 
         let compat_tool_obj = vdf
             .value
             .get_obj()
-            .unwrap()
-            .values()
-            .next()
-            .unwrap()
-            .get(0)
-            .unwrap()
-            .get_obj()
-            .unwrap();
+            .and_then(|f| f.values().next())
+            .and_then(|f| f.get(0))
+            .and_then(|f| f.get_obj())
+            .ok_or_else(||SteamUtilError::VdfParsingError("cri".to_string()))?;
 
         let path = compat_tool_vdf //fixme: compat tool vdf has a path key, we can probably use that to resolve
             .parent()
-            .unwrap()
+            .ok_or_else(||SteamUtilError::VdfMissingEntry("".to_string()))?
             .to_path_buf();
-        let directory_name = path.file_name().unwrap().to_str().unwrap().to_string();
-        let internal_name = compat_tool_obj.keys().next().unwrap().to_string();
+        let directory_name = path.file_name()
+            .and_then(|o| o.to_str())
+            .ok_or_else(||SteamUtilError::VdfMissingEntry("".to_string()))?
+            .to_string();
+        let internal_name = compat_tool_obj
+            .keys()
+            .next()
+            .ok_or_else(||SteamUtilError::VdfMissingEntry("".to_string()))?
+            .to_string();
         let internal_value = compat_tool_obj
             .values()
             .next()
@@ -215,61 +218,71 @@ impl SteamUtil {
             return Err(SteamUtilError::SteamConfigVdfNotFound);
         }
 
+        let config = fs::read_to_string(&steam_config_file)
+            .map_err(|_| SteamUtilError::SteamConfigVdfNotFound)?;
+
+        let config_vdf = Vdf::parse(&config).map_err(|_| {
+            SteamUtilError::VdfParsingError(steam_config_file.to_str().unwrap().to_string())
+        })?;
+
+        let software_vdf_obj = config_vdf
+            .value
+            .get_obj()
+            .and_then(|config| config.get("Software"))
+            .and_then(|o| o.get(0))
+            .and_then(|f| f.get_obj())
+            .ok_or_else(||SteamUtilError::VdfMissingEntry(
+                "Software object not found".to_string(),
+            ))?;
+
+        let valve_vdf_obj = software_vdf_obj
+            .get("Valve")
+            .or(software_vdf_obj.get("valve"))
+            .and_then(|valve_obj| valve_obj.get(0))
+            .and_then(|o| o.get_obj())
+            .ok_or_else(||SteamUtilError::VdfMissingEntry(
+                "Valve object not found".to_string(),
+            ))?;
+
+        let steam_obj = valve_vdf_obj
+            .get("Steam")
+            .and_then(|steam| steam.get(0))
+            .and_then(|o| o.get_obj())
+            .ok_or_else(||SteamUtilError::VdfMissingEntry(
+                "Steam object not found".to_string(),
+            ))?;
+
+        let compat_tool_mapping = steam_obj
+            .get("CompatToolMapping")
+            .and_then(|o| o.get(0))
+            .and_then(|f| f.get_obj())
+            .ok_or_else(||SteamUtilError::VdfMissingEntry(
+                "CompatToolMapping object not found".to_string(),
+            ))?;
+
         let mut compatibility_tools_mappings: HashMap<u64, String> = HashMap::new();
-        if let Ok(config) = fs::read_to_string(&steam_config_file) {
-            if let Ok(config_vdf) = Vdf::parse(&config) {
-                let software_vdf_obj = config_vdf
-                    .value
-                    .get_obj()
-                    .unwrap()
-                    .get("Software")
-                    .unwrap()
+        for (key, value) in compat_tool_mapping.iter() {
+            let key: u64 = key.parse().map_err(|_| {
+                SteamUtilError::VdfMissingEntry("Error parsing key to u64".to_string())
+            })?;
+            let key_obj =
+                value
                     .get(0)
-                    .unwrap()
-                    .get_obj()
-                    .unwrap();
-                let compat_tools_mappings = software_vdf_obj
-                    .get("Valve")
-                    .or(software_vdf_obj.get("valve"))
-                    .unwrap()
-                    .get(0)
-                    .unwrap()
-                    .get_obj()
-                    .unwrap()
-                    .get("Steam")
-                    .unwrap()
-                    .get(0)
-                    .unwrap()
-                    .get_obj()
-                    .unwrap()
-                    .get("CompatToolMapping")
-                    .unwrap()
-                    .get(0)
-                    .unwrap()
-                    .get_obj()
-                    .unwrap();
-                for (key, value) in compat_tools_mappings {
-                    let key: u64 = key.parse().unwrap();
-                    let key_obj = value.get(0).unwrap().get_obj().unwrap();
-                    let compat_tool_name = key_obj
-                        .get("name")
-                        .unwrap()
-                        .get(0)
-                        .unwrap()
-                        .get_str()
-                        .unwrap()
-                        .to_string();
-                    if !compat_tool_name.is_empty() {
-                        compatibility_tools_mappings.insert(key, compat_tool_name);
-                    }
-                }
-            } else {
-                return Err(SteamUtilError::VdfParsingError(
-                    steam_config_file.to_str().unwrap().to_string(),
-                ));
+                    .and_then(|o| o.get_obj())
+                    .ok_or_else(||SteamUtilError::VdfMissingEntry(
+                        "Key object not found".to_string(),
+                    ))?;
+            let compat_tool_name = key_obj
+                .get("name")
+                .and_then(|n| n.get(0))
+                .and_then(|o| o.get_str())
+                .ok_or_else(||SteamUtilError::VdfMissingEntry(
+                    "Compat tool name not found or invalid".to_string(),
+                ))?
+                .to_string();
+            if !compat_tool_name.is_empty() {
+                compatibility_tools_mappings.insert(key, compat_tool_name);
             }
-        } else {
-            return Err(SteamUtilError::SteamConfigVdfNotFound);
         }
 
         Ok(compatibility_tools_mappings)
@@ -300,14 +313,15 @@ impl SteamUtil {
         let mut library_folders: Vec<PathBuf> = Vec::new();
 
         for value in app_state_obj.values() {
-            let key_obj = value.get(0).unwrap().get_obj().unwrap();
+            let key_obj = value
+                .get(0)
+                .and_then(|o| o.get_obj())
+                .ok_or_else(||SteamUtilError::VdfMissingEntry("Fail to retrieve entry object".to_string()))?;
             let path = key_obj
                 .get("path")
-                .unwrap()
-                .get(0)
-                .unwrap()
-                .get_str()
-                .unwrap()
+                .and_then(|o| o.get(0))
+                .and_then(|o| o.get_str())
+                .ok_or_else(||SteamUtilError::VdfMissingEntry("Fail to retrieve path".to_string()))?
                 .to_string();
             if !path.is_empty() {
                 library_folders.push(PathBuf::from(path));
@@ -414,6 +428,7 @@ impl Display for SteamUtilError {
             }
             SteamUtilError::SteamConfigVdfNotFound => write!(f, "Steam config file not found"),
             SteamUtilError::VdfParsingError(msg) => write!(f, "Failed to parse VDF file: {}", msg),
+            SteamUtilError::VdfMissingEntry(msg) => write!(f, "Missing VDF entry: {}", msg),
         }
     }
 }

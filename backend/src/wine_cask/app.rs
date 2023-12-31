@@ -5,7 +5,7 @@ use crate::wine_cask::flavors::{
 use crate::wine_cask::install::{Install, QueueCompatibilityTool, QueueCompatibilityToolState};
 use crate::wine_cask::uninstall::Uninstall;
 use crate::PeerMap;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -159,11 +159,17 @@ impl WineCask {
         let compat_tools_mapping = self
             .steam_util
             .get_compatibility_tools_mappings()
-            .expect("Failed to get compatibility tools mappings");
+            .unwrap_or_else(|err| {
+                warn!("Failed to get compatibility tools mappings: {}", err);
+                HashMap::new()
+            });
         let installed_games = self
             .steam_util
             .list_installed_games()
-            .expect("Failed to get list of installed games");
+            .unwrap_or_else(|err| {
+                warn!("Failed to get list of installed games: {}", err);
+                Vec::new()
+            });
         let used_by_games: Vec<String> = installed_games
             .iter()
             .filter(|game| {
