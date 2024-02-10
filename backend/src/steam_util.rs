@@ -123,65 +123,72 @@ impl SteamUtil {
         &self,
         compat_tool_vdf: &PathBuf,
     ) -> Result<CompatibilityTool, SteamUtilError> {
+        // Read the content of the VDF file
         let vdf_text = fs::read_to_string(compat_tool_vdf)
             .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))?;
+
+        // Parse the VDF text into a Vdf struct
         let vdf = Vdf::parse(&vdf_text)
             .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))?;
 
+        // Extract the compatibility tool object from the parsed VDF
         let compat_tool_obj = vdf
             .value
             .get_obj()
             .and_then(|f| f.values().next())
             .and_then(|f| f.get(0))
             .and_then(|f| f.get_obj())
-            .ok_or_else(||SteamUtilError::VdfParsingError("cri".to_string()))?;
+            .ok_or_else(|| SteamUtilError::VdfParsingError("Invalid VDF structure".to_string()))?;
 
-        let path = compat_tool_vdf //fixme: compat tool vdf has a path key, we can probably use that to resolve
+        // Extract the path from the compatibility tool VDF file
+        let path = compat_tool_vdf
             .parent()
-            .ok_or_else(||SteamUtilError::VdfMissingEntry("".to_string()))?
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("Parent directory not found".to_string()))?
             .to_path_buf();
-        let directory_name = path.file_name()
+
+        // Extract directory name from the path
+        let directory_name = path
+            .file_name()
             .and_then(|o| o.to_str())
-            .ok_or_else(||SteamUtilError::VdfMissingEntry("".to_string()))?
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("Directory name not found".to_string()))?
             .to_string();
+
+        // Extract internal name, display name, from_os_list, and to_os_list from the compatibility tool object
         let internal_name = compat_tool_obj
             .keys()
             .next()
-            .ok_or_else(||SteamUtilError::VdfMissingEntry("".to_string()))?
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("Internal name not found".to_string()))?
             .to_string();
+
         let internal_value = compat_tool_obj
             .values()
             .next()
-            .unwrap()
-            .get(0)
-            .unwrap()
-            .get_obj()
-            .unwrap();
+            .and_then(|o| o.get(0))
+            .and_then(|o| o.get_obj())
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("Internal value not found".to_string()))?;
+
         let display_name = internal_value
             .get("display_name")
-            .unwrap()
-            .get(0)
-            .unwrap()
-            .get_str()
-            .unwrap()
-            .to_string();
+            .and_then(|o| o.get(0))
+            .and_then(|o| o.get_str())
+            .and_then(|o| Option::from(o.to_string()))
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("Display name not found".to_string()))?;
+
         let from_os_list = internal_value
             .get("from_oslist")
-            .unwrap()
-            .get(0)
-            .unwrap()
-            .get_str()
-            .unwrap()
-            .to_string();
+            .and_then(|o| o.get(0))
+            .and_then(|o| o.get_str())
+            .and_then(|o| Option::from(o.to_string()))
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("From OS list not found".to_string()))?;
+
         let to_os_list = internal_value
             .get("to_oslist")
-            .unwrap()
-            .get(0)
-            .unwrap()
-            .get_str()
-            .unwrap()
-            .to_string();
+            .and_then(|o| o.get(0))
+            .and_then(|o| o.get_str())
+            .and_then(|o| Option::from(o.to_string()))
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("To OS list not found".to_string()))?;
 
+        // Create a CompatibilityTool struct and return it
         let steam_compat_tool = CompatibilityTool {
             path,
             directory_name,
