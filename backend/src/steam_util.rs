@@ -116,7 +116,7 @@ impl SteamUtil {
                 .map_err(|_err| SteamUtilError::CompatibilityToolsDirectoryCreationFailed)
                 .unwrap();
         }
-        return path;
+        path
     }
 
     pub fn read_compatibility_tool_from_vdf_path(
@@ -136,14 +136,16 @@ impl SteamUtil {
             .value
             .get_obj()
             .and_then(|f| f.values().next())
-            .and_then(|f| f.get(0))
+            .and_then(|f| f.first())
             .and_then(|f| f.get_obj())
             .ok_or_else(|| SteamUtilError::VdfParsingError("Invalid VDF structure".to_string()))?;
 
         // Extract the path from the compatibility tool VDF file
         let path = compat_tool_vdf
             .parent()
-            .ok_or_else(|| SteamUtilError::VdfMissingEntry("Parent directory not found".to_string()))?
+            .ok_or_else(|| {
+                SteamUtilError::VdfMissingEntry("Parent directory not found".to_string())
+            })?
             .to_path_buf();
 
         // Extract directory name from the path
@@ -163,27 +165,29 @@ impl SteamUtil {
         let internal_value = compat_tool_obj
             .values()
             .next()
-            .and_then(|o| o.get(0))
+            .and_then(|o| o.first())
             .and_then(|o| o.get_obj())
-            .ok_or_else(|| SteamUtilError::VdfMissingEntry("Internal value not found".to_string()))?;
+            .ok_or_else(|| {
+                SteamUtilError::VdfMissingEntry("Internal value not found".to_string())
+            })?;
 
         let display_name = internal_value
             .get("display_name")
-            .and_then(|o| o.get(0))
+            .and_then(|o| o.first())
             .and_then(|o| o.get_str())
             .and_then(|o| Option::from(o.to_string()))
             .ok_or_else(|| SteamUtilError::VdfMissingEntry("Display name not found".to_string()))?;
 
         let from_os_list = internal_value
             .get("from_oslist")
-            .and_then(|o| o.get(0))
+            .and_then(|o| o.first())
             .and_then(|o| o.get_str())
             .and_then(|o| Option::from(o.to_string()))
             .ok_or_else(|| SteamUtilError::VdfMissingEntry("From OS list not found".to_string()))?;
 
         let to_os_list = internal_value
             .get("to_oslist")
-            .and_then(|o| o.get(0))
+            .and_then(|o| o.first())
             .and_then(|o| o.get_str())
             .and_then(|o| Option::from(o.to_string()))
             .ok_or_else(|| SteamUtilError::VdfMissingEntry("To OS list not found".to_string()))?;
@@ -209,9 +213,12 @@ impl SteamUtil {
             .filter(|x| {
                 x.metadata().unwrap().is_dir() && x.path().join("compatibilitytool.vdf").exists()
             })
-            .map(|x| {
+            .flat_map(|x| {
                 self.read_compatibility_tool_from_vdf_path(&x.path().join("compatibilitytool.vdf"))
-                    .unwrap()
+                    .map_err(|err| {
+                        error!("Error reading compatibility tool vdf: {}", err);
+                        err
+                    })
             })
             .collect();
 
@@ -236,56 +243,50 @@ impl SteamUtil {
             .value
             .get_obj()
             .and_then(|config| config.get("Software"))
-            .and_then(|o| o.get(0))
+            .and_then(|o| o.first())
             .and_then(|f| f.get_obj())
-            .ok_or_else(||SteamUtilError::VdfMissingEntry(
-                "Software object not found".to_string(),
-            ))?;
+            .ok_or_else(|| {
+                SteamUtilError::VdfMissingEntry("Software object not found".to_string())
+            })?;
 
         let valve_vdf_obj = software_vdf_obj
             .get("Valve")
             .or(software_vdf_obj.get("valve"))
-            .and_then(|valve_obj| valve_obj.get(0))
+            .and_then(|valve_obj| valve_obj.first())
             .and_then(|o| o.get_obj())
-            .ok_or_else(||SteamUtilError::VdfMissingEntry(
-                "Valve object not found".to_string(),
-            ))?;
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("Valve object not found".to_string()))?;
 
         let steam_obj = valve_vdf_obj
             .get("Steam")
-            .and_then(|steam| steam.get(0))
+            .and_then(|steam| steam.first())
             .and_then(|o| o.get_obj())
-            .ok_or_else(||SteamUtilError::VdfMissingEntry(
-                "Steam object not found".to_string(),
-            ))?;
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("Steam object not found".to_string()))?;
 
         let compat_tool_mapping = steam_obj
             .get("CompatToolMapping")
-            .and_then(|o| o.get(0))
+            .and_then(|o| o.first())
             .and_then(|f| f.get_obj())
-            .ok_or_else(||SteamUtilError::VdfMissingEntry(
-                "CompatToolMapping object not found".to_string(),
-            ))?;
+            .ok_or_else(|| {
+                SteamUtilError::VdfMissingEntry("CompatToolMapping object not found".to_string())
+            })?;
 
         let mut compatibility_tools_mappings: HashMap<u64, String> = HashMap::new();
         for (key, value) in compat_tool_mapping.iter() {
             let key: u64 = key.parse().map_err(|_| {
                 SteamUtilError::VdfMissingEntry("Error parsing key to u64".to_string())
             })?;
-            let key_obj =
-                value
-                    .get(0)
-                    .and_then(|o| o.get_obj())
-                    .ok_or_else(||SteamUtilError::VdfMissingEntry(
-                        "Key object not found".to_string(),
-                    ))?;
+            let key_obj = value.first().and_then(|o| o.get_obj()).ok_or_else(|| {
+                SteamUtilError::VdfMissingEntry("Key object not found".to_string())
+            })?;
             let compat_tool_name = key_obj
                 .get("name")
-                .and_then(|n| n.get(0))
+                .and_then(|n| n.first())
                 .and_then(|o| o.get_str())
-                .ok_or_else(||SteamUtilError::VdfMissingEntry(
-                    "Compat tool name not found or invalid".to_string(),
-                ))?
+                .ok_or_else(|| {
+                    SteamUtilError::VdfMissingEntry(
+                        "Compat tool name not found or invalid".to_string(),
+                    )
+                })?
                 .to_string();
             if !compat_tool_name.is_empty() {
                 compatibility_tools_mappings.insert(key, compat_tool_name);
@@ -320,15 +321,16 @@ impl SteamUtil {
         let mut library_folders: Vec<PathBuf> = Vec::new();
 
         for value in app_state_obj.values() {
-            let key_obj = value
-                .get(0)
-                .and_then(|o| o.get_obj())
-                .ok_or_else(||SteamUtilError::VdfMissingEntry("Fail to retrieve entry object".to_string()))?;
+            let key_obj = value.first().and_then(|o| o.get_obj()).ok_or_else(|| {
+                SteamUtilError::VdfMissingEntry("Fail to retrieve entry object".to_string())
+            })?;
             let path = key_obj
                 .get("path")
-                .and_then(|o| o.get(0))
+                .and_then(|o| o.first())
                 .and_then(|o| o.get_str())
-                .ok_or_else(||SteamUtilError::VdfMissingEntry("Fail to retrieve path".to_string()))?
+                .ok_or_else(|| {
+                    SteamUtilError::VdfMissingEntry("Fail to retrieve path".to_string())
+                })?
                 .to_string();
             if !path.is_empty() {
                 library_folders.push(PathBuf::from(path));
@@ -383,36 +385,39 @@ impl SteamUtil {
             .unwrap()
             .filter_map(Result::ok)
             .filter(|x| x.path().extension().unwrap_or_default().eq("acf"))
-            .map(|file| {
-                let app_manifest = fs::read_to_string(file.path())
-                    .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))
-                    .unwrap();
-                let vdf = Vdf::parse(&app_manifest)
-                    .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))
-                    .unwrap();
-                let app_state_obj = vdf.value.get_obj().unwrap();
-                let app_id: u64 = app_state_obj
-                    .get("appid")
-                    .unwrap()
-                    .get(0)
-                    .unwrap()
-                    .get_str()
-                    .unwrap()
-                    .parse()
-                    .unwrap();
-                let name: String = app_state_obj
-                    .get("name")
-                    .unwrap()
-                    .get(0)
-                    .unwrap()
-                    .get_str()
-                    .unwrap()
-                    .to_string();
-                SteamApp { app_id, name }
+            .flat_map(|file| {
+                Self::read_app_manifest_to_steam_app(file.path()).map_err(|err| {
+                    error!("Error reading app manifest: {}", err);
+                    err
+                })
             })
             .collect();
 
         Ok(apps)
+    }
+
+    pub fn read_app_manifest_to_steam_app(path_buf: PathBuf) -> Result<SteamApp, SteamUtilError> {
+        let app_manifest = fs::read_to_string(path_buf)
+            .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))?;
+        let vdf = Vdf::parse(&app_manifest)
+            .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()))?;
+        let app_id: u64 = vdf
+            .value
+            .get_obj()
+            .and_then(|f| f.get("appid"))
+            .and_then(|f| f.first())
+            .and_then(|f| f.get_str())
+            .and_then(|f| f.parse::<u64>().ok())
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("appid".to_string()))?;
+        let name: String = vdf
+            .value
+            .get_obj()
+            .and_then(|f| f.get("name"))
+            .and_then(|f| f.first())
+            .and_then(|f| f.get_str())
+            .and_then(|f| Option::from(f.to_string()))
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("name".to_string()))?;
+        Ok(SteamApp { app_id, name })
     }
 }
 
