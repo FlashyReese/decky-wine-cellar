@@ -207,7 +207,7 @@ impl SteamUtil {
     pub fn list_compatibility_tools(&self) -> Result<Vec<CompatibilityTool>, SteamUtilError> {
         let compatibility_tools_directory = self.get_steam_compatibility_tools_directory();
 
-        let compat_tools: Vec<CompatibilityTool> = fs::read_dir(&compatibility_tools_directory)
+        let compat_tools: Vec<CompatibilityTool> = fs::read_dir(compatibility_tools_directory)
             .unwrap()
             .filter_map(Result::ok)
             .filter(|x| {

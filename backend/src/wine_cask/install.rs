@@ -113,8 +113,7 @@ impl WineCask {
                 reader,
             )
             .await;
-        } else {
-        }
+        } 
     }
 
     pub async fn extract_generate_and_move(
@@ -167,7 +166,7 @@ impl WineCask {
                 .collect();
 
             if valid_directories.len() == 1 {
-                let first = valid_directories.get(0).unwrap();
+                let first = valid_directories.first().unwrap();
                 let new_compat_tool_vdf = first.join("compatibilitytool.vdf");
                 let new_path = match queue_compatibility_tool.flavor {
                     CompatibilityToolFlavor::ProtonGE => first.clone(),
