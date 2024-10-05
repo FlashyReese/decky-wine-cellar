@@ -11,16 +11,18 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: Install pnpm
-        run: npm install -g pnpm
-
+      - name: Setup PNPM@9
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+  
       - name: Install frontend dependencies
         run: pnpm i
 
@@ -42,9 +44,7 @@ jobs:
         run: cp -r dist "${{ steps.extract-project-name.outputs.project_name }}"
 
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
+        run: rustup update
 
       - name: Extract backend binary name
         id: extract-backend-binary-name
@@ -69,7 +69,7 @@ jobs:
           cp -r "${{ steps.extract-project-name.outputs.project_name }}" build
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: "${{ steps.extract-project-name.outputs.project_name }}-${{ steps.extract-project-version.outputs.project_version }}"
           path: "build"

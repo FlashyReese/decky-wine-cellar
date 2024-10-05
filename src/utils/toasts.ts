@@ -1,4 +1,4 @@
-import { ServerAPI, ToastData } from "decky-frontend-lib";
+import { toaster, ToastData } from "@decky/api";
 import { log, error } from "./logger";
 import { Request, RequestType } from "../types";
 import { v4 as uuidv4 } from "uuid"; // Import UUID v4
@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from "uuid"; // Import UUID v4
 let shouldReconnect = true; // Global flag to control reconnection
 let socket: WebSocket | null = null; // Global WebSocket reference
 
-export const setupToasts = (serverAPI: ServerAPI): void => {
+export const setupToasts = (): void => {
   const setupWebsocket = (): void => {
     if (!shouldReconnect) {
       return; // If reconnection is disabled, don't proceed
@@ -29,7 +29,7 @@ export const setupToasts = (serverAPI: ServerAPI): void => {
             showToast: true,
           };
 
-          serverAPI.toaster.toast(toastData);
+          toaster.toast(toastData);
           log("Received backend notification: " + response.notification);
         }
       }

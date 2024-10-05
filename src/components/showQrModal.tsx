@@ -1,4 +1,4 @@
-import { ModalRoot, showModal } from "decky-frontend-lib";
+import { ModalRoot, showModal } from "@decky/ui";
 import QRCode from "react-qr-code";
 
 export const showQrModal = (url: string) => {

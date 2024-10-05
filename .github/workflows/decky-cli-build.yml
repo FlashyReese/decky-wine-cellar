@@ -11,15 +11,17 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: Install pnpm
-        run: npm install -g pnpm
+      - name: Setup PNPM@9
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
       - name: Decky CLI Build
         run: |
@@ -27,9 +29,10 @@ jobs:
           curl -L -o $(pwd)/cli/decky "https://github.com/SteamDeckHomebrew/cli/releases/latest/download/decky-linux-x86_64"
           chmod +x $(pwd)/cli/decky
           $(pwd)/cli/decky plugin build $(pwd)
+          unzip "out/Wine Cellar.zip" -d "out/Wine Cellar"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: "decky-wine-cellar"
-          path: "out"
+          name: decky-wine-cellar
+          path: out/Wine Cellar/*

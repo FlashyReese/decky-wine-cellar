@@ -6,7 +6,7 @@ import {
   Field,
   Focusable,
   Navigation,
-} from "decky-frontend-lib";
+} from "@decky/ui";
 import { SiDiscord, SiGithub, SiKofi } from "react-icons/si";
 import { HiOutlineQrCode } from "react-icons/hi2";
 import { showQrModal } from "../components/showQrModal";

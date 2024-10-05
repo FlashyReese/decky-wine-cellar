@@ -1,6 +1,6 @@
 import { Markdown } from "./markdown";
 import { GitHubRelease } from "../types";
-import { Focusable } from "decky-frontend-lib";
+import { Focusable } from "@decky/ui";
 
 function ChangeLogModal({
   release,
