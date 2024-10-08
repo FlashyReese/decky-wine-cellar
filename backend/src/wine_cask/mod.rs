@@ -11,7 +11,6 @@ pub mod app;
 pub mod flavors;
 pub mod install;
 pub mod uninstall;
-pub mod r#virtual;
 
 pub fn generate_compatibility_tool_vdf(path: PathBuf, internal_name: &str, display_name: &str) {
     let mut file = File::create(path).expect("Failed to create file");

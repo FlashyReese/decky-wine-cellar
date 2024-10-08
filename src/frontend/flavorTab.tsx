@@ -10,7 +10,7 @@ import {
   ProgressBarWithInfo,
   showContextMenu,
   showModal,
-} from "decky-frontend-lib";
+} from "@decky/ui";
 import { FaEllipsisH } from "react-icons/fa";
 import {
   AppState,

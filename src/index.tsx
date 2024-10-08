@@ -1,19 +1,21 @@
 import {
+  routerHook,
+} from "@decky/api";
+import {
   ButtonItem,
   definePlugin,
   PanelSection,
   PanelSectionRow,
   Router,
-  ServerAPI,
   staticClasses,
-} from "decky-frontend-lib";
-import { VFC } from "react";
+} from "@decky/ui";
+import { FC } from "react";
 
 import ManagePage from "./frontend";
 import { forceCloseToastsWebSocket, setupToasts } from "./utils/toasts";
 import { GiCellarBarrels } from "react-icons/gi";
 
-const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
+const Content: FC = () => {
   return (
     <PanelSection title="Wine Cellar">
       <PanelSectionRow>
@@ -31,19 +33,19 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({}) => {
   );
 };
 
-export default definePlugin((serverApi: ServerAPI) => {
-  setupToasts(serverApi);
-  serverApi.routerHook.addRoute("/wine-cellar", () => {
+export default definePlugin(() => {
+  setupToasts();
+  routerHook.addRoute("/wine-cellar", () => {
     return <ManagePage />;
   });
 
   return {
     title: <div className={staticClasses.Title}>Wine Cellar</div>,
-    content: <Content serverAPI={serverApi} />,
+    content: <Content />,
     icon: <GiCellarBarrels />,
     onDismount() {
       forceCloseToastsWebSocket();
-      serverApi.routerHook.removeRoute("/wine-cellar");
+      routerHook.removeRoute("/wine-cellar");
     },
   };
 });

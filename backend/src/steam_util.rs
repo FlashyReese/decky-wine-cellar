@@ -99,15 +99,6 @@ impl SteamUtil {
         Err(SteamUtilError::SteamDirectoryNotFound)
     }
 
-    pub fn find() -> Result<Self, SteamUtilError> {
-        match SteamUtil::find_steam_directory(None) {
-            Ok(steam_home) => Ok(Self {
-                steam_path: steam_home,
-            }),
-            Err(err) => Err(err),
-        }
-    }
-
     pub fn get_steam_compatibility_tools_directory(&self) -> PathBuf {
         let path = self.steam_path.join("compatibilitytools.d"); // Apparently this is not created by default
         if !path.exists() && self.steam_path.exists() {

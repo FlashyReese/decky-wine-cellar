@@ -1,4 +1,4 @@
-import { SidebarNavigation, SidebarNavigationPage } from "decky-frontend-lib";
+import { SidebarNavigation, SidebarNavigationPage } from "@decky/ui";
 
 import { useEffect, useState } from "react";
 import { AppState, Request, RequestType } from "../types";
