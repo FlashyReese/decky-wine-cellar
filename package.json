@@ -1,7 +1,7 @@
 {
   "name": "decky-wine-cellar",
   "type": "module",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A decky plugin to manage Steam Play compatibility tools",
   "scripts": {
     "build": "rollup -c",
