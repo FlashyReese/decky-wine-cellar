@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct Release {
     pub url: String,
     pub id: u64,
@@ -18,7 +18,7 @@ pub struct Release {
     pub body: String,
 }
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct Asset {
     pub url: String,
     pub id: u64,
@@ -37,10 +37,31 @@ pub struct Response {
     pub message: String,
 }
 
+/// Result of a conditional fetch operation
+#[derive(Debug)]
+pub enum FetchResult {
+    /// Releases were modified, contains the new releases and optionally the last-modified timestamp
+    Modified(Vec<Release>, Option<String>),
+    /// Releases were not modified (304 Not Modified)
+    NotModified,
+}
+
+/// Fetches all releases from GitHub repository with optional conditional request support
+///
+/// # Arguments
+/// * `owner` - Repository owner
+/// * `repository` - Repository name
+/// * `if_modified_since` - Optional timestamp for If-Modified-Since header (RFC 2822 format)
+///
+/// # Returns
+/// * `Ok(FetchResult::Modified(releases, last_modified))` - New releases fetched
+/// * `Ok(FetchResult::NotModified)` - Server responded with 304 Not Modified
+/// * `Err(GitHubUtilError)` - Error occurred
 pub async fn list_all_releases(
     owner: &str,
     repository: &str,
-) -> Result<Vec<Release>, GitHubUtilError> {
+    if_modified_since: Option<&str>,
+) -> Result<FetchResult, GitHubUtilError> {
     let client = reqwest::Client::builder()
         .user_agent("FlashyReese/decky-wine-cellar")
         .build()
@@ -48,6 +69,7 @@ pub async fn list_all_releases(
 
     let mut releases: Vec<Release> = Vec::new();
     let mut page = 1;
+    let mut last_modified: Option<String> = None;
 
     loop {
         let url = format!(
@@ -55,9 +77,32 @@ pub async fn list_all_releases(
             owner, repository, page
         );
 
-        let response = client.get(&url).send().await?;
+        let mut request = client.get(&url);
+
+        // Add If-Modified-Since header only for the first page
+        if page == 1 {
+            if let Some(timestamp) = if_modified_since {
+                request = request.header("If-Modified-Since", timestamp);
+            }
+        }
+
+        let response = request.send().await?;
+
+        // Handle 304 Not Modified (only relevant for first page)
+        if page == 1 && response.status() == reqwest::StatusCode::NOT_MODIFIED {
+            return Ok(FetchResult::NotModified);
+        }
 
         if response.status().is_success() {
+            // Extract last-modified header from first page response
+            if page == 1 {
+                last_modified = response
+                    .headers()
+                    .get("last-modified")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+            }
+
             let response_text = response.text().await?;
             if let Ok(page_releases) = serde_json::from_str::<Vec<Release>>(&response_text) {
                 if page_releases.is_empty() {
@@ -81,7 +126,7 @@ pub async fn list_all_releases(
         }
     }
 
-    Ok(releases)
+    Ok(FetchResult::Modified(releases, last_modified))
 }
 
 #[derive(Debug)]
