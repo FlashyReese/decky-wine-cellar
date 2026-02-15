@@ -1,5 +1,5 @@
 use crate::github_util;
-use crate::github_util::Release;
+use crate::github_util::{Release, FetchResult};
 use crate::wine_cask::app::WineCask;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -173,57 +173,184 @@ impl WineCask {
         }
     }
 
+    /// Reads the last-modified timestamp from metadata file
+    fn read_cache_metadata(path: &str, owner: &str, repository: &str) -> Option<String> {
+        let metadata_file = PathBuf::from(path)
+            .join(format!("github_releases_{}_{}_metadata.txt", owner, repository));
+
+        if metadata_file.exists() {
+            fs::read_to_string(metadata_file).ok()
+        } else {
+            None
+        }
+    }
+
+    /// Writes the last-modified timestamp to metadata file
+    fn write_cache_metadata(path: &str, owner: &str, repository: &str, last_modified: &str) {
+        let metadata_file = PathBuf::from(path)
+            .join(format!("github_releases_{}_{}_metadata.txt", owner, repository));
+
+        if let Err(e) = fs::write(metadata_file, last_modified) {
+            warn!("Failed to write cache metadata: {}", e);
+        }
+    }
+
     async fn get_releases(
         &self,
         owner: &str,
         repository: &str,
         renew_cache: bool,
     ) -> Option<Vec<Release>> {
-        const SECONDS_IN_A_DAY: u64 = 84_600;
+        // Fixed: 86,400 seconds in a day (not 84,600)
+        const CACHE_DURATION_SECONDS: u64 = 86_400;
 
         let path = env::var("DECKY_PLUGIN_RUNTIME_DIR").unwrap_or("/tmp/".parse().unwrap());
+        let cache_file = PathBuf::from(&path)
+            .join(format!("github_releases_{}_{}_cache.json", owner, repository));
 
-        let file_name = format!("github_releases_{}_{}_cache.json", owner, repository);
-        let cache_file = PathBuf::from(path).join(&file_name);
-
-        if !renew_cache && cache_file.exists() && cache_file.is_file() {
-            let metadata = fs::metadata(&cache_file).ok()?;
-            let modified = metadata.modified().ok()?;
-
-            // Calculate the duration between the current time and the file modification time
-            let now = SystemTime::now();
-            let duration = now.duration_since(modified).ok()?;
-
-            if duration.as_secs() < SECONDS_IN_A_DAY {
-                // Update last checked time with file last modified time
-                let unix_timestamp = modified
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Failed to calculate duration")
-                    .as_secs();
-                self.app_state.lock().await.updater_last_check = Some(unix_timestamp);
-
-                let string = fs::read_to_string(&cache_file).ok()?;
-                let github_releases: Vec<Release> = serde_json::from_str(&string).ok()?;
-
-                // Check if parsing failed but data exists (cache is corrupted)
-                if github_releases.is_empty() {
-                    info!("Cached data is possibly corrupted or possibly missing information from outdated version. Renewing cache...");
-                } else {
-                    return Some(github_releases);
+        // Try to load cached data
+        let cached_data = if cache_file.exists() && cache_file.is_file() {
+            match fs::metadata(&cache_file) {
+                Ok(metadata) => match metadata.modified() {
+                    Ok(modified) => {
+                        let now = SystemTime::now();
+                        match now.duration_since(modified) {
+                            Ok(duration) => match fs::read_to_string(&cache_file) {
+                                Ok(string) => match serde_json::from_str::<Vec<Release>>(&string) {
+                                    Ok(github_releases) if !github_releases.is_empty() => {
+                                        Some((github_releases, duration.as_secs(), modified))
+                                    }
+                                    Ok(_) => {
+                                        info!(
+                                            "Cached data is empty or corrupted. Renewing cache..."
+                                        );
+                                        None
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            "Failed to parse cache file ({}). Renewing cache...",
+                                            e
+                                        );
+                                        None
+                                    }
+                                },
+                                Err(e) => {
+                                    warn!("Failed to read cache file ({}). Renewing cache...", e);
+                                    None
+                                }
+                            },
+                            Err(e) => {
+                                warn!(
+                                    "Invalid cache modification timestamp ({}). Renewing cache...",
+                                    e
+                                );
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to read cache file metadata timestamp ({}). Renewing cache...",
+                            e
+                        );
+                        None
+                    }
+                },
+                Err(e) => {
+                    warn!("Failed to read cache file metadata ({}). Renewing cache...", e);
+                    None
                 }
-            } else {
-                info!("Cache file is older than 1 day. Fetching new releases.");
+            }
+        } else {
+            None
+        };
+
+        // Determine if we should use cache, check with conditional request, or fetch fresh
+        let should_fetch_fresh = renew_cache || cached_data.is_none();
+
+        if !should_fetch_fresh {
+            if let Some((releases, cache_age, modified)) = cached_data {
+                // Cache is fresh (less than CACHE_DURATION old), use it directly
+                if cache_age < CACHE_DURATION_SECONDS {
+                    let unix_timestamp = modified
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Failed to calculate duration")
+                        .as_secs();
+                    self.app_state.lock().await.updater_last_check = Some(unix_timestamp);
+
+                    info!("Using cached releases (age: {}s < {}s)", cache_age, CACHE_DURATION_SECONDS);
+                    return Some(releases);
+                }
+
+                // Cache is stale, try conditional request with If-Modified-Since
+                let last_modified = Self::read_cache_metadata(&path, owner, repository);
+
+                info!("Cache is stale (age: {}s), checking with GitHub using If-Modified-Since", cache_age);
+
+                match github_util::list_all_releases(owner, repository, last_modified.as_deref()).await {
+                    Ok(FetchResult::NotModified) => {
+                        // Cache is still valid, update last_check time and use it
+                        let unix_timestamp = modified
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Failed to calculate duration")
+                            .as_secs();
+                        self.app_state.lock().await.updater_last_check = Some(unix_timestamp);
+
+                        info!("GitHub confirms cache is still valid (304 Not Modified)");
+                        return Some(releases);
+                    }
+                    Ok(FetchResult::Modified(new_releases, new_last_modified)) => {
+                        // New data available, update cache
+                        if new_releases.is_empty() {
+                            error!("No releases found in fresh fetch.");
+                            return None;
+                        }
+
+                        let current_time = SystemTime::now();
+                        let unix_timestamp = current_time
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Failed to calculate duration")
+                            .as_secs();
+                        self.app_state.lock().await.updater_last_check = Some(unix_timestamp);
+
+                        // Update cache file
+                        let json = serde_json::to_string(&new_releases).ok()?;
+                        if let Err(e) = fs::write(&cache_file, json) {
+                            error!("Failed to write cache file: {}", e);
+                        }
+
+                        // Update metadata file with new last-modified timestamp
+                        if let Some(lm) = new_last_modified {
+                            Self::write_cache_metadata(&path, owner, repository, &lm);
+                        }
+
+                        info!("Updated cache with {} releases from GitHub", new_releases.len());
+                        return Some(new_releases);
+                    }
+                    Err(e) => {
+                        // Failed to check with GitHub, fall back to cached data
+                        warn!("Failed to check GitHub for updates ({}), using stale cache", e);
+                        let unix_timestamp = modified
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Failed to calculate duration")
+                            .as_secs();
+                        self.app_state.lock().await.updater_last_check = Some(unix_timestamp);
+                        return Some(releases);
+                    }
+                }
             }
         }
 
-        let github_releases = match github_util::list_all_releases(owner, repository).await {
-            Ok(releases) => {
+        // Fetch fresh data (no cache or renew_cache=true)
+        info!("Fetching fresh releases from GitHub for {}/{}", owner, repository);
+
+        match github_util::list_all_releases(owner, repository, None).await {
+            Ok(FetchResult::Modified(releases, last_modified)) => {
                 if releases.is_empty() {
                     error!("No releases found.");
                     return None;
                 }
 
-                // Update last checked time
                 let current_time = SystemTime::now();
                 let unix_timestamp = current_time
                     .duration_since(UNIX_EPOCH)
@@ -231,32 +358,40 @@ impl WineCask {
                     .as_secs();
                 self.app_state.lock().await.updater_last_check = Some(unix_timestamp);
 
+                // Update cache file
                 let json = serde_json::to_string(&releases).ok()?;
-                fs::write(&cache_file, json).ok()?;
-                releases
+                if let Err(e) = fs::write(&cache_file, json) {
+                    error!("Failed to write cache file: {}", e);
+                }
+
+                // Update metadata file
+                if let Some(lm) = last_modified {
+                    Self::write_cache_metadata(&path, owner, repository, &lm);
+                }
+
+                info!("Fetched and cached {} releases", releases.len());
+                Some(releases)
             }
-            Err(_) => {
-                if cache_file.exists() && cache_file.is_file() {
-                    // Update last checked time with file last modified time
-                    let metadata = fs::metadata(&cache_file).ok()?;
-                    let modified = metadata.modified().ok()?;
+            Ok(FetchResult::NotModified) => {
+                // This shouldn't happen when we don't send If-Modified-Since
+                warn!("Unexpected 304 Not Modified response without If-Modified-Since header");
+                None
+            }
+            Err(e) => {
+                // Try to fall back to cached data even if it's old
+                if let Some((releases, _, modified)) = cached_data {
+                    warn!("Failed to fetch releases ({}), falling back to cached data", e);
                     let unix_timestamp = modified
                         .duration_since(UNIX_EPOCH)
                         .expect("Failed to calculate duration")
                         .as_secs();
                     self.app_state.lock().await.updater_last_check = Some(unix_timestamp);
-
-                    let string = fs::read_to_string(&cache_file).ok()?;
-                    let github_releases: Vec<Release> = serde_json::from_str(&string).ok()?;
-                    warn!("Unable to fetch new releases. Using cached releases.");
-                    github_releases
+                    Some(releases)
                 } else {
-                    error!("Unable to fetch new releases. No cached releases found.");
-                    return None;
+                    error!("Unable to fetch releases and no cache available: {}", e);
+                    None
                 }
             }
-        };
-
-        Some(github_releases)
+        }
     }
 }

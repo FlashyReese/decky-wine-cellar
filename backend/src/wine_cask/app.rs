@@ -261,6 +261,8 @@ impl WineCask {
         self.app_state.lock().await.updater_state = UpdaterState::Checking;
         self.broadcast_app_state(peer_map).await;
         self.app_state.lock().await.flavors = self.get_flavors(renew_cache).await;
+        // Rebuild installable lists from freshly fetched flavors so frontend pages update.
+        self.update_compatibility_tools_and_available_flavors().await;
         self.app_state.lock().await.updater_state = UpdaterState::Idle;
         self.broadcast_app_state(peer_map).await;
     }
