@@ -1,28 +1,31 @@
 name: Decky CLI Build and Package
-
 on:
   push:
     branches:
       - main
-
+permissions:
+  contents: read
 jobs:
-  build:
-    runs-on: ubuntu-latest
-
+  decky-cli-build:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          node-version: 18
-
-      - name: Setup PNPM@9
-        uses: pnpm/action-setup@v4
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          check-latest: true
+          package-manager-cache: false
+      - name: Set up PNPM
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           version: 9
-
+          cache: false
+          run_install: false
       - name: Decky CLI Build
         run: |
           mkdir $(pwd)/cli
@@ -30,9 +33,9 @@ jobs:
           chmod +x $(pwd)/cli/decky
           $(pwd)/cli/decky plugin build $(pwd)
           unzip "out/Wine Cellar.zip" -d "out/Wine Cellar"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload Artifacts to GitHub
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: decky-wine-cellar
           path: out/Wine Cellar/*
+          if-no-files-found: error
