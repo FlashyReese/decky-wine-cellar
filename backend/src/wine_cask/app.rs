@@ -817,6 +817,16 @@ impl WineCask {
     }
 
     pub async fn get_catalog_release(&self, release_id: &str) -> Option<CatalogRelease> {
+        let is_empty = {
+            let app_state = self.app_state.lock().await;
+            app_state.catalog_flavors.is_empty()
+        };
+        if is_empty {
+            let flavors = self.get_flavors(false).await;
+            let mut app_state = self.app_state.lock().await;
+            app_state.catalog_flavors = flavors;
+        }
+
         self.app_state
             .lock()
             .await
@@ -825,6 +835,34 @@ impl WineCask {
             .flat_map(|flavor| flavor.releases.iter())
             .find(|release| release.id == release_id)
             .cloned()
+    }
+
+    pub async fn reclaim_memory_if_idle(&self, peer_map: &PeerMap) {
+        let is_empty = peer_map.lock().await.is_empty();
+        if is_empty {
+            let can_clear = {
+                let app_state = self.app_state.lock().await;
+                app_state.current_operation.is_none() && app_state.operation_queue.is_empty()
+            };
+            if can_clear {
+                info!("All clients disconnected and no active operations. Clearing catalog flavors.");
+                let mut app_state = self.app_state.lock().await;
+                app_state.catalog_flavors.clear();
+                drop(app_state);
+
+                let mut cache = self.operation_broadcast_cache.lock().await;
+                *cache = None;
+                drop(cache);
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            info!("Calling malloc_trim to release memory to OS");
+            unsafe {
+                libc::malloc_trim(0);
+            }
+        }
     }
 
     pub async fn get_installed_tool(

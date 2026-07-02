@@ -141,6 +141,7 @@ async fn handle_connection(
 
     info!("{} disconnected", &addr);
     peer_map.lock().await.remove(&addr);
+    wine_cask.reclaim_memory_if_idle(&peer_map).await;
 }
 
 fn configure_logger() -> Result<(), IoError> {
@@ -211,7 +212,15 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
 
     match request.r#type {
         MessageType::GetState => {
-            wine_cask.broadcast_app_state(peer_map).await;
+            let needs_reload = {
+                let app_state = wine_cask.app_state.lock().await;
+                app_state.catalog_flavors.is_empty()
+            };
+            if needs_reload {
+                wine_cask.check_for_flavor_updates(peer_map, false).await;
+            } else {
+                wine_cask.broadcast_app_state(peer_map).await;
+            }
         }
         MessageType::ReportSteamVisibleTools => {
             if let Some(steam_visible_tools) = request.steam_visible_tools {

@@ -174,6 +174,7 @@ pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
             }
 
             wine_cask.complete_current_operation(&peer_map).await;
+            wine_cask.reclaim_memory_if_idle(&peer_map).await;
             continue;
         }
 
