@@ -1,5 +1,6 @@
 use crate::github_util::{Asset, Release};
 use crate::wine_cask::app::{InstallTarget, OperationState, WineCask};
+use crate::wine_cask::download_progress::DownloadProgressTracker;
 use crate::wine_cask::flavors::{CatalogRelease, CompatibilityToolFlavor};
 use crate::wine_cask::{generate_compatibility_tool_vdf, recursive_delete_dir_entry};
 use crate::PeerMap;
@@ -9,12 +10,14 @@ use log::{error, info, warn};
 use std::fs::{create_dir_all, File};
 use std::io::{BufReader, Read};
 use std::path::{Component, Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::fs::File as TokioFile;
 use tokio::io::AsyncWriteExt;
+use tokio::time::{interval_at, MissedTickBehavior};
 use xz2::bufread::XzDecoder;
 
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
+const DOWNLOAD_STATUS_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_ARCHIVE_SIZE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED_SIZE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES: usize = 25_000;
@@ -144,7 +147,10 @@ impl WineCask {
             return;
         }
 
-        let total_size = response.content_length();
+        let total_size = response
+            .content_length()
+            .filter(|size| *size > 0)
+            .or((download_plan.expected_size > 0).then_some(download_plan.expected_size));
         if total_size
             .map(|size| size > MAX_ARCHIVE_SIZE_BYTES)
             .unwrap_or(false)
@@ -159,14 +165,39 @@ impl WineCask {
         }
         let mut downloaded_size = 0u64;
         let mut body = response.bytes_stream();
+        let mut download_progress = DownloadProgressTracker::new(total_size, Instant::now());
+        let mut status_timer = interval_at(
+            tokio::time::Instant::now() + DOWNLOAD_STATUS_INTERVAL,
+            DOWNLOAD_STATUS_INTERVAL,
+        );
+        status_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        self.update_current_download(download_progress.snapshot(0, Instant::now()), peer_map)
+            .await;
 
-        while let Some(chunk_result) = body.next().await {
+        loop {
             if self.current_operation_is_cancelling().await {
                 cleanup_temp_directory(&temp_dir);
                 self.broadcast_notification(peer_map, "Installation cancelled")
                     .await;
                 return;
             }
+
+            // Keep speed and remaining time current even when the server stops sending data.
+            // Sampling on a timer also avoids broadcasting once per network chunk.
+            let chunk_result = tokio::select! {
+                chunk = body.next() => match chunk {
+                    Some(chunk) => chunk,
+                    None => break,
+                },
+                _ = status_timer.tick() => {
+                    self.update_current_download(
+                        download_progress.snapshot(downloaded_size, Instant::now()),
+                        peer_map,
+                    )
+                    .await;
+                    continue;
+                }
+            };
 
             let chunk = match chunk_result {
                 Ok(chunk) => chunk,
@@ -199,17 +230,13 @@ impl WineCask {
                 .await;
                 return;
             }
-
-            if let Some(total_size) = total_size {
-                if total_size > 0 {
-                    let progress = ((downloaded_size as f64 / total_size as f64) * 100.0)
-                        .round()
-                        .clamp(0.0, 100.0) as u8;
-                    self.update_current_operation(OperationState::Downloading, progress, peer_map)
-                        .await;
-                }
-            }
         }
+
+        self.update_current_download(
+            download_progress.snapshot(downloaded_size, Instant::now()),
+            peer_map,
+        )
+        .await;
 
         if let Err(err) = archive_file.flush().await {
             error!("Failed to flush temporary archive: {}", err);
@@ -302,12 +329,20 @@ impl WineCask {
         let extracted_directory = std::fs::read_dir(temp_dir)
             .map_err(|err| format!("Failed to read extraction directory: {}", err))?
             .filter_map(Result::ok)
-            .filter(|entry| entry.metadata().map(|meta| meta.is_dir()).unwrap_or(false))
+            .filter(|entry| {
+                entry
+                    .file_type()
+                    .map(|file_type| file_type.is_dir())
+                    .unwrap_or(false)
+            })
             .map(|entry| entry.path())
             .find(|path| path.join("compatibilitytool.vdf").exists())
             .ok_or_else(|| {
                 "Failed to find the extracted compatibility tool contents".to_string()
             })?;
+
+        validate_extracted_symlinks(&extracted_directory)
+            .map_err(|err| format!("Installation failed: {}", err))?;
 
         if self.current_operation_is_cancelling().await {
             return Err("Installation cancelled".to_string());
@@ -498,9 +533,7 @@ fn safe_unpack_tar(reader: Box<dyn Read>, destination: &Path) -> Result<(), Stri
         }
 
         let entry_type = entry.header().entry_type();
-        if entry_type.is_symlink()
-            || entry_type.is_hard_link()
-            || entry_type.is_block_special()
+        if entry_type.is_block_special()
             || entry_type.is_character_special()
             || entry_type.is_fifo()
         {
@@ -509,13 +542,40 @@ fn safe_unpack_tar(reader: Box<dyn Read>, destination: &Path) -> Result<(), Stri
 
         let path = entry
             .path()
-            .map_err(|err| format!("Failed to resolve tar entry path: {}", err))?;
+            .map_err(|err| format!("Failed to resolve tar entry path: {}", err))?
+            .into_owned();
 
         if !archive_path_is_safe(&path) {
             return Err(format!(
                 "Unsafe archive entry path detected: {}",
                 path.display()
             ));
+        }
+
+        if entry_type.is_symlink() {
+            let target = entry
+                .link_name()
+                .map_err(|err| format!("Failed to resolve symbolic link target: {}", err))?
+                .ok_or_else(|| "Archive symbolic link has no target".to_string())?;
+            if !archive_symlink_target_is_safe(&path, &target) {
+                return Err(format!(
+                    "Unsafe archive symbolic link detected: {} -> {}",
+                    path.display(),
+                    target.display()
+                ));
+            }
+        } else if entry_type.is_hard_link() {
+            let target = entry
+                .link_name()
+                .map_err(|err| format!("Failed to resolve hard link target: {}", err))?
+                .ok_or_else(|| "Archive hard link has no target".to_string())?;
+            if !archive_relative_target_is_safe(&target, 0) {
+                return Err(format!(
+                    "Unsafe archive hard link detected: {} -> {}",
+                    path.display(),
+                    target.display()
+                ));
+            }
         }
 
         total_unpacked_size = total_unpacked_size
@@ -525,12 +585,18 @@ fn safe_unpack_tar(reader: Box<dyn Read>, destination: &Path) -> Result<(), Stri
             return Err("Archive unpacked size is larger than the supported limit".to_string());
         }
 
-        entry
+        let unpacked = entry
             .unpack_in(destination)
             .map_err(|err| format!("Failed to unpack archive entry: {}", err))?;
+        if !unpacked {
+            return Err(format!(
+                "Archive entry could not be unpacked safely: {}",
+                path.display()
+            ));
+        }
     }
 
-    Ok(())
+    validate_extracted_symlinks(destination)
 }
 
 fn archive_path_is_safe(path: &Path) -> bool {
@@ -540,6 +606,78 @@ fn archive_path_is_safe(path: &Path) -> bool {
             Component::ParentDir | Component::RootDir | Component::Prefix(_)
         )
     })
+}
+
+fn archive_symlink_target_is_safe(entry_path: &Path, target: &Path) -> bool {
+    // Symbolic link targets are relative to the link's parent. Track the
+    // lexical depth inside the archive root and reject targets that climb out
+    // of it. Entry parents are already guaranteed to contain only safe,
+    // relative components.
+    let depth = entry_path
+        .parent()
+        .into_iter()
+        .flat_map(Path::components)
+        .filter(|component| matches!(component, Component::Normal(_)))
+        .count();
+
+    archive_relative_target_is_safe(target, depth)
+}
+
+fn archive_relative_target_is_safe(target: &Path, mut depth: usize) -> bool {
+    if target.as_os_str().is_empty() {
+        return false;
+    }
+
+    for component in target.components() {
+        match component {
+            Component::Normal(_) => depth += 1,
+            Component::CurDir => {}
+            Component::ParentDir if depth > 0 => depth -= 1,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return false,
+        }
+    }
+
+    true
+}
+
+fn validate_extracted_symlinks(destination: &Path) -> Result<(), String> {
+    let canonical_destination = destination
+        .canonicalize()
+        .map_err(|err| format!("Failed to resolve extraction directory: {}", err))?;
+    let mut pending_directories = vec![destination.to_path_buf()];
+
+    while let Some(directory) = pending_directories.pop() {
+        let entries = std::fs::read_dir(&directory)
+            .map_err(|err| format!("Failed to audit extracted directory: {}", err))?;
+        for entry in entries {
+            let entry = entry.map_err(|err| format!("Failed to audit extracted entry: {}", err))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|err| format!("Failed to inspect extracted entry: {}", err))?;
+            let path = entry.path();
+
+            if file_type.is_symlink() {
+                let resolved = path.canonicalize().map_err(|err| {
+                    format!(
+                        "Extracted symbolic link is dangling or invalid: {} ({})",
+                        path.display(),
+                        err
+                    )
+                })?;
+                if !resolved.starts_with(&canonical_destination) {
+                    return Err(format!(
+                        "Extracted symbolic link escapes the archive: {} -> {}",
+                        path.display(),
+                        resolved.display()
+                    ));
+                }
+            } else if file_type.is_dir() {
+                pending_directories.push(path);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn prepare_temp_directory(staging_root: &Path) -> Option<PathBuf> {
@@ -634,14 +772,94 @@ mod tests {
     }
 
     #[test]
-    fn safe_unpack_tar_rejects_symlink_entries() {
-        let archive = archive_with_symlink("tool/link", "target");
+    fn safe_unpack_tar_accepts_internal_symlink_entries() {
+        let archive = archive_with_file_and_symlinks(
+            "tool/lib/payload",
+            &[
+                ("tool/lib64", "lib"),
+                ("tool/bin/payload", "../lib/payload"),
+            ],
+        );
+        let destination = tempdir().expect("Failed to create temp directory");
+
+        safe_unpack_tar(Box::new(Cursor::new(archive)), destination.path())
+            .expect("Expected internal symbolic link to be extracted");
+
+        assert_eq!(
+            std::fs::read_link(destination.path().join("tool/lib64"))
+                .expect("Expected extracted symbolic link"),
+            PathBuf::from("lib")
+        );
+        assert_eq!(
+            std::fs::read_link(destination.path().join("tool/bin/payload"))
+                .expect("Expected extracted symbolic link"),
+            PathBuf::from("../lib/payload")
+        );
+    }
+
+    #[test]
+    fn safe_unpack_tar_rejects_symlink_target_outside_archive() {
+        for target in ["../../outside", "/etc/passwd"] {
+            let archive = archive_with_symlink("tool/link", target);
+            let destination = tempdir().expect("Failed to create temp directory");
+
+            let err = safe_unpack_tar(Box::new(Cursor::new(archive)), destination.path())
+                .expect_err("Expected escaping symbolic link to be rejected");
+
+            assert!(err.contains("Unsafe archive symbolic link"));
+        }
+    }
+
+    #[test]
+    fn safe_unpack_tar_rejects_dangling_symlink() {
+        let archive =
+            archive_with_file_and_symlinks("tool/file", &[("tool/dangling", "missing-target")]);
         let destination = tempdir().expect("Failed to create temp directory");
 
         let err = safe_unpack_tar(Box::new(Cursor::new(archive)), destination.path())
-            .expect_err("Expected symlink archive entry to be rejected");
+            .expect_err("Expected dangling symbolic link to be rejected");
 
-        assert!(err.contains("unsupported special entries"));
+        assert!(err.contains("dangling or invalid"));
+    }
+
+    #[test]
+    fn safe_unpack_tar_rejects_chained_symlink_escape() {
+        // Each raw target is lexically inside the archive, but resolving `dir`
+        // before the following `..` makes `escape` point outside the root.
+        let archive =
+            archive_with_file_and_symlinks("tool/file", &[("dir", "."), ("escape", "dir/..")]);
+        let destination = tempdir().expect("Failed to create temp directory");
+
+        let err = safe_unpack_tar(Box::new(Cursor::new(archive)), destination.path())
+            .expect_err("Expected chained symbolic link escape to be rejected");
+
+        assert!(err.contains("escapes the archive"));
+    }
+
+    #[test]
+    fn safe_unpack_tar_accepts_internal_hard_link_entries() {
+        let archive = archive_with_hard_link("tool/original", "tool/copy", "tool/../tool/original");
+        let destination = tempdir().expect("Failed to create temp directory");
+
+        safe_unpack_tar(Box::new(Cursor::new(archive)), destination.path())
+            .expect("Expected internal hard link to be extracted");
+
+        assert_eq!(
+            std::fs::read(destination.path().join("tool/copy"))
+                .expect("Expected extracted hard link"),
+            b"payload"
+        );
+    }
+
+    #[test]
+    fn safe_unpack_tar_rejects_hard_link_target_outside_archive() {
+        let archive = archive_with_hard_link("tool/original", "tool/copy", "../outside");
+        let destination = tempdir().expect("Failed to create temp directory");
+
+        let err = safe_unpack_tar(Box::new(Cursor::new(archive)), destination.path())
+            .expect_err("Expected escaping hard link to be rejected");
+
+        assert!(err.contains("Unsafe archive hard link"));
     }
 
     #[test]
@@ -697,6 +915,64 @@ mod tests {
             builder
                 .append_data(&mut header, path, std::io::empty())
                 .expect("Failed to append symlink entry");
+            builder.finish().expect("Failed to finish tar archive");
+        }
+        archive
+    }
+
+    fn archive_with_file_and_symlinks(file: &str, links: &[(&str, &str)]) -> Vec<u8> {
+        let mut archive = Vec::new();
+        {
+            let mut builder = Builder::new(&mut archive);
+            let mut file_header = Header::new_gnu();
+            file_header.set_entry_type(EntryType::Regular);
+            file_header.set_mode(0o644);
+            file_header.set_size(7);
+            file_header.set_cksum();
+            builder
+                .append_data(&mut file_header, file, Cursor::new(b"payload"))
+                .expect("Failed to append regular file entry");
+
+            for (path, target) in links {
+                let mut link_header = Header::new_gnu();
+                link_header.set_entry_type(EntryType::Symlink);
+                link_header
+                    .set_link_name(target)
+                    .expect("Failed to set symlink target");
+                link_header.set_size(0);
+                link_header.set_cksum();
+                builder
+                    .append_data(&mut link_header, path, std::io::empty())
+                    .expect("Failed to append symlink entry");
+            }
+            builder.finish().expect("Failed to finish tar archive");
+        }
+        archive
+    }
+
+    fn archive_with_hard_link(original: &str, link: &str, target: &str) -> Vec<u8> {
+        let mut archive = Vec::new();
+        {
+            let mut builder = Builder::new(&mut archive);
+            let mut file_header = Header::new_gnu();
+            file_header.set_entry_type(EntryType::Regular);
+            file_header.set_mode(0o644);
+            file_header.set_size(7);
+            file_header.set_cksum();
+            builder
+                .append_data(&mut file_header, original, Cursor::new(b"payload"))
+                .expect("Failed to append regular file entry");
+
+            let mut link_header = Header::new_gnu();
+            link_header.set_entry_type(EntryType::Link);
+            link_header
+                .set_link_name(target)
+                .expect("Failed to set hard link target");
+            link_header.set_size(0);
+            link_header.set_cksum();
+            builder
+                .append_data(&mut link_header, link, std::io::empty())
+                .expect("Failed to append hard link entry");
             builder.finish().expect("Failed to finish tar archive");
         }
         archive

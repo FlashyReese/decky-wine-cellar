@@ -1,4 +1,5 @@
 use crate::steam_util::SteamUtil;
+use crate::wine_cask::download_progress::DownloadProgress;
 use crate::wine_cask::flavors::{
     CatalogRelease, CompatibilityToolFlavor, Flavor, InstalledCompatibilityTool,
     InstalledToolSource, SteamClientCompatToolInfo, VirtualCompatibilityTool,
@@ -135,6 +136,8 @@ pub struct OperationInfo {
     pub kind: OperationKind,
     pub state: OperationState,
     pub progress: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download: Option<DownloadProgress>,
     pub release_id: Option<String>,
     pub installed_tool_id: Option<String>,
     pub virtual_tool_id: Option<String>,
@@ -175,6 +178,22 @@ impl WineCask {
                 operation.state = state;
             }
             operation.progress = progress;
+            if operation.state != OperationState::Downloading {
+                operation.download = None;
+            }
+        }
+        drop(app_state);
+        self.broadcast_operation_state(peer_map).await;
+    }
+
+    pub async fn update_current_download(&self, download: DownloadProgress, peer_map: &PeerMap) {
+        let mut app_state = self.app_state.lock().await;
+        if let Some(operation) = &mut app_state.current_operation {
+            if operation.state != OperationState::Cancelling {
+                operation.state = OperationState::Downloading;
+                operation.progress = download.percentage();
+                operation.download = Some(download);
+            }
         }
         drop(app_state);
         self.broadcast_operation_state(peer_map).await;
@@ -259,6 +278,7 @@ impl WineCask {
                 kind: OperationKind::Install,
                 state: OperationState::Pending,
                 progress: 0,
+                download: None,
                 release_id: Some(catalog_release.id),
                 installed_tool_id: None,
                 virtual_tool_id,
@@ -336,6 +356,7 @@ impl WineCask {
                 kind: OperationKind::Uninstall,
                 state: OperationState::Pending,
                 progress: 0,
+                download: None,
                 release_id: installed_tool.catalog_release_id.clone(),
                 installed_tool_id: Some(installed_tool.id.clone()),
                 virtual_tool_id: installed_tool.virtual_tool_id.clone(),
@@ -371,6 +392,7 @@ impl WineCask {
                 kind: OperationKind::CreateVirtualTool,
                 state: OperationState::Pending,
                 progress: 0,
+                download: None,
                 release_id: None,
                 installed_tool_id: None,
                 virtual_tool_id: None,
@@ -439,6 +461,7 @@ impl WineCask {
                 kind: OperationKind::RenameVirtualTool,
                 state: OperationState::Pending,
                 progress: 0,
+                download: None,
                 release_id: None,
                 installed_tool_id: virtual_tool.installed_tool_id.clone(),
                 virtual_tool_id: Some(virtual_tool_id),
@@ -493,6 +516,7 @@ impl WineCask {
                 kind: OperationKind::RemoveVirtualTool,
                 state: OperationState::Pending,
                 progress: 0,
+                download: None,
                 release_id: virtual_tool.current_payload_release_id.clone(),
                 installed_tool_id: virtual_tool.installed_tool_id.clone(),
                 virtual_tool_id: Some(virtual_tool_id),
@@ -533,6 +557,7 @@ impl WineCask {
             if operation.id == operation_id {
                 if operation.kind == OperationKind::Install {
                     operation.state = OperationState::Cancelling;
+                    operation.download = None;
                     drop(app_state);
                     self.broadcast_operation_state(peer_map).await;
                     self.broadcast_notification(peer_map, "Cancelling install")
@@ -877,9 +902,13 @@ fn find_catalog_release_for_tool(
     catalog_flavors.iter().find_map(|flavor| {
         flavor.releases.iter().find_map(|catalog_release| {
             if flavor.flavor == CompatibilityToolFlavor::ProtonGE {
-                if installed_tool.internal_name == catalog_release.release.tag_name
-                    || installed_tool.display_name == catalog_release.release.tag_name
-                {
+                if proton_ge_tool_name_matches_release(
+                    &installed_tool.internal_name,
+                    &catalog_release.release.tag_name,
+                ) || proton_ge_tool_name_matches_release(
+                    &installed_tool.display_name,
+                    &catalog_release.release.tag_name,
+                ) {
                     return Some(catalog_release.clone());
                 }
             } else if flavor.flavor == CompatibilityToolFlavor::ProtonCachyOS {
@@ -901,6 +930,12 @@ fn find_catalog_release_for_tool(
             None
         })
     })
+}
+
+fn proton_ge_tool_name_matches_release(tool_name: &str, release_tag: &str) -> bool {
+    tool_name == release_tag
+        || tool_name.strip_suffix("-x86_64") == Some(release_tag)
+        || tool_name.strip_suffix("-aarch64") == Some(release_tag)
 }
 
 fn apply_catalog_release(
@@ -987,7 +1022,6 @@ fn is_download_progress_update_throttled(
         && last_operation.state == OperationState::Downloading
         && next_operation.state == OperationState::Downloading
         && next_operation.progress < 100
-        && last_operation.progress != next_operation.progress
         && last_operation.label == next_operation.label
         && last_operation.release_id == next_operation.release_id
         && last_operation.installed_tool_id == next_operation.installed_tool_id
@@ -1005,6 +1039,7 @@ mod tests {
             kind: OperationKind::Install,
             state,
             progress,
+            download: None,
             release_id: Some("release-1".to_string()),
             installed_tool_id: None,
             virtual_tool_id: None,
@@ -1058,6 +1093,90 @@ mod tests {
     }
 
     #[test]
+    fn throttles_download_statistics_when_percentage_has_not_changed() {
+        let now = Instant::now();
+        let last_broadcast = (snapshot(OperationState::Downloading, 37), now);
+        let mut next_snapshot = snapshot(OperationState::Downloading, 37);
+        next_snapshot.current_operation.as_mut().unwrap().download = Some(DownloadProgress {
+            bytes_downloaded: 370,
+            total_bytes: Some(1000),
+            bytes_per_second: Some(100),
+            eta_seconds: Some(7),
+            elapsed_seconds: 4,
+        });
+
+        assert!(should_skip_operation_broadcast(
+            Some(&last_broadcast),
+            &next_snapshot,
+            now + Duration::from_millis(50),
+        ));
+        assert!(!should_skip_operation_broadcast(
+            Some(&last_broadcast),
+            &next_snapshot,
+            now + DOWNLOAD_PROGRESS_BROADCAST_INTERVAL,
+        ));
+    }
+
+    #[tokio::test]
+    async fn download_statistics_clear_on_extraction_and_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        let app = WineCask {
+            steam_util: SteamUtil::new(directory.path().to_path_buf()),
+            app_state: Arc::new(Mutex::new(AppState {
+                catalog_flavors: Vec::new(),
+                installed_tools: Vec::new(),
+                virtual_tools: Vec::new(),
+                current_operation: Some(operation(OperationState::Downloading, 0)),
+                queued_operations: Vec::new(),
+                updater_state: UpdaterState::Idle,
+                updater_last_check: None,
+                steam_visible_tools: Vec::new(),
+                operation_queue: VecDeque::new(),
+            })),
+            operation_broadcast_cache: Arc::new(Mutex::new(None)),
+            queue_notify: Arc::new(Notify::new()),
+            virtual_tool_manifest_path: directory.path().join("virtual_tools.json"),
+        };
+        let peers = PeerMap::new(Mutex::new(HashMap::new()));
+        let download = DownloadProgress {
+            bytes_downloaded: 500,
+            total_bytes: Some(1000),
+            bytes_per_second: Some(100),
+            eta_seconds: Some(5),
+            elapsed_seconds: 5,
+        };
+        app.update_current_download(download.clone(), &peers).await;
+        {
+            let state = app.app_state.lock().await;
+            let current = state.current_operation.as_ref().unwrap();
+            assert_eq!(current.progress, 50);
+            let serialized = serde_json::to_value(current).unwrap();
+            assert_eq!(serialized["download"]["bytes_per_second"], 100);
+        }
+
+        app.update_current_operation(OperationState::Extracting, 0, &peers)
+            .await;
+        assert!(app
+            .app_state
+            .lock()
+            .await
+            .current_operation
+            .as_ref()
+            .unwrap()
+            .download
+            .is_none());
+
+        app.update_current_download(download.clone(), &peers).await;
+        app.cancel_operation("operation-1".to_string(), &peers)
+            .await;
+        app.update_current_download(download, &peers).await;
+        let state = app.app_state.lock().await;
+        let current = state.current_operation.as_ref().unwrap();
+        assert!(current.state == OperationState::Cancelling);
+        assert!(current.download.is_none());
+    }
+
+    #[test]
     fn allows_immediate_state_transitions() {
         let now = Instant::now();
         let last_broadcast = (snapshot(OperationState::Downloading, 99), now);
@@ -1080,6 +1199,34 @@ mod tests {
             Some(&last_broadcast),
             &next_snapshot,
             now + Duration::from_millis(50),
+        ));
+    }
+
+    #[test]
+    fn matches_proton_ge_architecture_suffixes() {
+        assert!(proton_ge_tool_name_matches_release(
+            "GE-Proton11-6-x86_64",
+            "GE-Proton11-6"
+        ));
+        assert!(proton_ge_tool_name_matches_release(
+            "GE-Proton11-6-aarch64",
+            "GE-Proton11-6"
+        ));
+        assert!(proton_ge_tool_name_matches_release(
+            "GE-Proton10-34",
+            "GE-Proton10-34"
+        ));
+    }
+
+    #[test]
+    fn does_not_match_unrelated_proton_ge_suffixes_or_versions() {
+        assert!(!proton_ge_tool_name_matches_release(
+            "GE-Proton11-6-hotfix",
+            "GE-Proton11-6"
+        ));
+        assert!(!proton_ge_tool_name_matches_release(
+            "GE-Proton11-60-x86_64",
+            "GE-Proton11-6"
         ));
     }
 }

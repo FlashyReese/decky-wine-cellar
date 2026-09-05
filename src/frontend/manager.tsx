@@ -12,15 +12,19 @@ import {
 } from "@decky/ui";
 import { FaEllipsisH } from "react-icons/fa";
 import ChangeLogModal from "../components/changeLogModal";
+import OperationProgress from "../components/operationProgress";
 import { showTextPromptModal } from "../components/textPromptModal";
 import {
   AppState,
   GitHubRelease,
   InstalledCompatibilityTool,
   InstalledToolSource,
+  OperationKind,
+  OperationState,
   VirtualCompatibilityTool,
 } from "../types";
 import {
+  cancelOperation,
   createVirtualTool,
   removeVirtualTool,
   renameVirtualTool,
@@ -42,6 +46,10 @@ export default function ManagerTab({
     ...(appState.current_operation != null ? [appState.current_operation] : []),
     ...appState.queued_operations,
   ];
+  const currentInstall =
+    appState.current_operation?.kind === OperationKind.Install
+      ? appState.current_operation
+      : undefined;
 
   const showCreateVirtualToolModal = () =>
     showTextPromptModal({
@@ -121,6 +129,26 @@ export default function ManagerTab({
 
   return (
     <DialogBody>
+      {currentInstall != null && (
+        <DialogControlsSection>
+          <DialogControlsSectionHeader>
+            Current Installation
+          </DialogControlsSectionHeader>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
+              {currentInstall.label}
+            </span>
+            <DialogButton
+              style={{ width: "auto", minWidth: "100px", flexShrink: 0 }}
+              disabled={currentInstall.state === OperationState.Cancelling}
+              onClick={() => cancelOperation(socket, currentInstall.id)}
+            >
+              Cancel
+            </DialogButton>
+          </div>
+          <OperationProgress operation={currentInstall} />
+        </DialogControlsSection>
+      )}
       <DialogControlsSection>
         <DialogControlsSectionHeader>Virtual Tools</DialogControlsSectionHeader>
         <DialogButton onClick={showCreateVirtualToolModal}>
@@ -132,7 +160,7 @@ export default function ManagerTab({
             without restarting for every payload change.
           </div>
         ) : (
-          <ul style={{ listStyleType: "none" }}>
+          <ul style={{ listStyleType: "none", margin: 0, padding: 0 }}>
             {appState.virtual_tools.map((virtualTool) => {
               const slotBusy = operations.some(
                 (operation) => operation.virtual_tool_id === virtualTool.id,
@@ -148,7 +176,7 @@ export default function ManagerTab({
                     paddingBottom: "10px",
                   }}
                 >
-                  <span>
+                  <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                     {virtualTool.user_label}
                     {virtualTool.current_payload_name != null &&
                       " (" + virtualTool.current_payload_name + ")"}
@@ -159,6 +187,8 @@ export default function ManagerTab({
                   <Focusable
                     style={{
                       marginLeft: "auto",
+                      flexShrink: 0,
+                      paddingLeft: "12px",
                       boxShadow: "none",
                       display: "flex",
                       justifyContent: "right",
@@ -239,7 +269,7 @@ export default function ManagerTab({
 
       <DialogControlsSection>
         <DialogControlsSectionHeader>Installed</DialogControlsSectionHeader>
-        <ul style={{ listStyleType: "none" }}>
+        <ul style={{ listStyleType: "none", margin: 0, padding: 0 }}>
           {directInstalledTools.map((installedTool) => (
             <li
               key={installedTool.id}
@@ -250,7 +280,7 @@ export default function ManagerTab({
                 paddingBottom: "10px",
               }}
             >
-              <span>
+              <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                 {getInstalledToolLabel(installedTool)}
                 {installedTool.requires_restart && " (Requires Restart)"}
                 {installedTool.used_by_games.length !== 0 && " (Used By Games)"}
@@ -258,6 +288,8 @@ export default function ManagerTab({
               <Focusable
                 style={{
                   marginLeft: "auto",
+                  flexShrink: 0,
+                  paddingLeft: "12px",
                   boxShadow: "none",
                   display: "flex",
                   justifyContent: "right",

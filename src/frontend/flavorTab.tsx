@@ -7,12 +7,12 @@ import {
   Focusable,
   Menu,
   MenuItem,
-  ProgressBarWithInfo,
   showContextMenu,
   showModal,
 } from "@decky/ui";
 import { FaEllipsisH } from "react-icons/fa";
 import ChangeLogModal from "../components/changeLogModal";
+import OperationProgress from "../components/operationProgress";
 import {
   AppState,
   CatalogRelease,
@@ -80,7 +80,7 @@ export default function FlavorTab({
       {installedToolsForFlavor.length !== 0 && (
         <DialogControlsSection>
           <DialogControlsSectionHeader>Installed</DialogControlsSectionHeader>
-          <ul style={{ listStyleType: "none" }}>
+          <ul style={{ listStyleType: "none", margin: 0, padding: 0 }}>
             {installedToolsForFlavor.map((tool) => (
               <li
                 key={tool.id}
@@ -91,7 +91,7 @@ export default function FlavorTab({
                   paddingBottom: "10px",
                 }}
               >
-                <span>
+                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                   {getToolLabel(tool)}
                   {tool.source === InstalledToolSource.Virtual && " (Virtual Slot)"}
                   {tool.requires_restart && " (Requires Restart)"}
@@ -100,6 +100,8 @@ export default function FlavorTab({
                 <Focusable
                   style={{
                     marginLeft: "auto",
+                    flexShrink: 0,
+                    paddingLeft: "12px",
                     boxShadow: "none",
                     display: "flex",
                     justifyContent: "right",
@@ -173,7 +175,7 @@ export default function FlavorTab({
 
       <DialogControlsSection>
         <DialogControlsSectionHeader>Catalog</DialogControlsSectionHeader>
-        <ul style={{ listStyleType: "none" }}>
+        <ul style={{ listStyleType: "none", margin: 0, padding: 0 }}>
           {flavor.releases.map((release) => {
             const directInstallPresent = appState.installed_tools.some(
               (tool) =>
@@ -188,10 +190,10 @@ export default function FlavorTab({
             const directInstallOperations = releaseOperations.filter((operation) =>
               isDirectInstallOperation(operation),
             );
-            const activeDirectInstallOperation =
+            const activeInstallOperation =
               appState.current_operation != null &&
               appState.current_operation.release_id === release.id &&
-              isDirectInstallOperation(appState.current_operation)
+              appState.current_operation.kind === OperationKind.Install
                 ? appState.current_operation
                 : undefined;
             const directInstallBusy = directInstallOperations.length !== 0;
@@ -199,107 +201,103 @@ export default function FlavorTab({
             return (
               <li
                 key={release.id}
-                style={{
-                  display: "flex",
-                  flexDirection: "row",
-                  alignItems: "center",
-                  paddingBottom: "10px",
-                }}
+                style={{ paddingBottom: "16px", minWidth: 0 }}
               >
-                <span>
-                  {release.release.tag_name}
-                  {directInstallPresent && " (Installed)"}
-                  {directInstallOperations.some(
-                    (operation) => operation.state === OperationState.Pending,
-                  ) && " (Queued)"}
-                </span>
-                {activeDirectInstallOperation != null && (
-                  <div
-                    style={{
-                      marginLeft: "auto",
-                      paddingLeft: "10px",
-                      minWidth: "200px",
-                    }}
-                  >
-                    <ProgressBarWithInfo
-                      nProgress={activeDirectInstallOperation.progress}
-                      indeterminate={
-                        activeDirectInstallOperation.state === OperationState.Extracting
-                      }
-                      sOperationText={activeDirectInstallOperation.state}
-                      bottomSeparator="none"
-                    />
-                  </div>
-                )}
-                <Focusable
+                <div
                   style={{
-                    marginLeft: "auto",
-                    boxShadow: "none",
                     display: "flex",
-                    justifyContent: "right",
+                    alignItems: "center",
+                    minWidth: 0,
                   }}
                 >
-                  <DialogButton
+                  <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+                    {release.release.tag_name}
+                    {directInstallPresent && " (Installed)"}
+                    {releaseOperations.some(
+                      (operation) => operation.state === OperationState.Pending,
+                    ) && " (Queued)"}
+                  </span>
+                  <Focusable
                     style={{
-                      height: "40px",
-                      width: "40px",
-                      padding: "10px 12px",
-                      minWidth: "40px",
+                      marginLeft: "auto",
+                      flexShrink: 0,
+                      paddingLeft: "12px",
+                      boxShadow: "none",
+                      display: "flex",
+                      justifyContent: "right",
                     }}
-                    onClick={(event: MouseEvent) =>
-                      showContextMenu(
-                        <Menu label="Catalog Release Actions">
-                          <MenuItem
-                            disabled={directInstallPresent || directInstallBusy}
-                            onClick={() => {
-                              installCatalogRelease(socket, release.id);
-                            }}
-                          >
-                            Install as New Tool
-                          </MenuItem>
-                          {appState.virtual_tools.map((virtualTool) => (
-                            <MenuItem
-                              key={virtualTool.id}
-                              disabled={operations.some(
-                                (operation) =>
-                                  operation.virtual_tool_id === virtualTool.id,
-                              )}
-                              onClick={() => {
-                                mountCatalogReleaseToVirtualTool(
-                                  socket,
-                                  release.id,
-                                  virtualTool.id,
-                                );
-                              }}
-                            >
-                              Mount to {virtualTool.user_label}
-                            </MenuItem>
-                          ))}
-                          {releaseOperations.map((operation) => (
-                            <MenuItem
-                              key={operation.id}
-                              onClick={() => {
-                                cancelOperation(socket, operation.id);
-                              }}
-                            >
-                              Cancel {operation.label}
-                            </MenuItem>
-                          ))}
-                          <MenuItem
-                            onClick={() => {
-                              handleViewChangeLog(release);
-                            }}
-                          >
-                            View Change Log
-                          </MenuItem>
-                        </Menu>,
-                        event.currentTarget ?? window,
-                      )
-                    }
                   >
-                    <FaEllipsisH />
-                  </DialogButton>
-                </Focusable>
+                    <DialogButton
+                      style={{
+                        height: "40px",
+                        width: "40px",
+                        padding: "10px 12px",
+                        minWidth: "40px",
+                      }}
+                      onClick={(event: MouseEvent) =>
+                        showContextMenu(
+                          <Menu label="Catalog Release Actions">
+                            <MenuItem
+                              disabled={directInstallPresent || directInstallBusy}
+                              onClick={() => {
+                                installCatalogRelease(socket, release.id);
+                              }}
+                            >
+                              Install as New Tool
+                            </MenuItem>
+                            {appState.virtual_tools.map((virtualTool) => (
+                              <MenuItem
+                                key={virtualTool.id}
+                                disabled={operations.some(
+                                  (operation) =>
+                                    operation.virtual_tool_id === virtualTool.id,
+                                )}
+                                onClick={() => {
+                                  mountCatalogReleaseToVirtualTool(
+                                    socket,
+                                    release.id,
+                                    virtualTool.id,
+                                  );
+                                }}
+                              >
+                                Mount to {virtualTool.user_label}
+                              </MenuItem>
+                            ))}
+                            {releaseOperations.map((operation) => (
+                              <MenuItem
+                                key={operation.id}
+                                disabled={
+                                  operation.state === OperationState.Cancelling
+                                }
+                                onClick={() => {
+                                  cancelOperation(socket, operation.id);
+                                }}
+                              >
+                                Cancel {operation.label}
+                              </MenuItem>
+                            ))}
+                            <MenuItem
+                              onClick={() => {
+                                handleViewChangeLog(release);
+                              }}
+                            >
+                              View Change Log
+                            </MenuItem>
+                          </Menu>,
+                          event.currentTarget ?? window,
+                        )
+                      }
+                    >
+                      <FaEllipsisH />
+                    </DialogButton>
+                  </Focusable>
+                </div>
+                {activeInstallOperation != null && (
+                  <OperationProgress
+                    operation={activeInstallOperation}
+                    showLabel={activeInstallOperation.virtual_tool_id != null}
+                  />
+                )}
               </li>
             );
           })}

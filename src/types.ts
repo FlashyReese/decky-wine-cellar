@@ -89,6 +89,14 @@ export enum OperationState {
   Cancelling = "Cancelling",
 }
 
+export type DownloadProgress = {
+  bytes_downloaded: number;
+  total_bytes: number | null;
+  bytes_per_second: number | null;
+  eta_seconds: number | null;
+  elapsed_seconds: number;
+};
+
 export type OperationInfo = {
   id: string;
   label: string;
@@ -98,6 +106,7 @@ export type OperationInfo = {
   release_id?: string;
   installed_tool_id?: string;
   virtual_tool_id?: string;
+  download?: DownloadProgress | null;
 };
 
 export enum UpdaterState {
