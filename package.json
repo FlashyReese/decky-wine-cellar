@@ -46,6 +46,18 @@
     "uuid": "^10.0.0"
   },
   "pnpm": {
+    "supportedArchitectures": {
+      "os": [
+        "current"
+      ],
+      "cpu": [
+        "current"
+      ],
+      "libc": [
+        "glibc",
+        "musl"
+      ]
+    },
     "peerDependencyRules": {
       "ignoreMissing": [
         "react",
