@@ -83,19 +83,19 @@ function ProjectInformation() {
   const socialLinks = [
     {
       label: "GitHub",
-      icon: <SiGithub />,
+      icon: <SiGithub size={20} aria-hidden="true" />,
       link: "https://github.com/FlashyReese/decky-wine-cellar",
       buttonText: "Report an Issue",
     },
     {
       label: "Discord",
-      icon: <SiDiscord />,
+      icon: <SiDiscord size={20} aria-hidden="true" />,
       link: "https://discord.gg/MPHVG6MH4e",
       buttonText: "Join Us",
     },
     {
       label: "Ko-fi",
-      icon: <SiKofi />,
+      icon: <SiKofi size={20} aria-hidden="true" />,
       link: "https://ko-fi.com/flashyreese",
       buttonText: "Support the Project!",
     },
@@ -109,15 +109,20 @@ function ProjectInformation() {
           label={linkInfo.label}
           icon={linkInfo.icon}
           bottomSeparator={"none"}
-          padding={"none"}
+          inlineWrap={"shift-children-below"}
+          childrenContainerWidth={"min"}
+          verticalAlignment={"center"}
         >
           <Focusable
+            flow-children="right"
             style={{
               marginLeft: "auto",
               boxShadow: "none",
               display: "flex",
-              justifyContent: "right",
-              padding: "4px",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              gap: "8px",
+              maxWidth: "100%",
             }}
           >
             <DialogButton
@@ -127,11 +132,13 @@ function ProjectInformation() {
               style={{
                 padding: "10px",
                 fontSize: "14px",
+                width: "auto",
               }}
             >
               {linkInfo.buttonText}
             </DialogButton>
             <DialogButton
+              aria-label={`Show ${linkInfo.label} QR code`}
               onClick={() => {
                 showQrModal(linkInfo.link);
               }}
@@ -139,10 +146,11 @@ function ProjectInformation() {
                 display: "flex",
                 justifyContent: "center",
                 alignItems: "center",
-                padding: "10px",
-                maxWidth: "40px",
-                minWidth: "auto",
-                marginLeft: ".5em",
+                padding: 0,
+                width: "40px",
+                minWidth: "40px",
+                height: "40px",
+                flexShrink: 0,
               }}
             >
               <HiOutlineQrCode />
