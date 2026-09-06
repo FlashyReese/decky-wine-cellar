@@ -20,6 +20,7 @@ pub enum SteamUtilError {
     VdfMissingEntry(String),
 }
 
+#[derive(Clone)]
 pub struct SteamUtil {
     steam_path: PathBuf,
 }
@@ -275,6 +276,135 @@ impl SteamUtil {
         }
 
         Ok(compatibility_tools_mappings)
+    }
+
+    /// Returns the compatibility tools that users explicitly forced for individual apps.
+    ///
+    /// Steam also stores automatic compatibility selections in `CompatToolMapping`. Those
+    /// entries currently use a lower priority, while the compatibility-properties UI writes
+    /// user-forced selections with priority 250. Keep those two concepts separate so callers do
+    /// not present an automatic Steam choice as a user override.
+    pub fn get_forced_compatibility_tools_mappings(
+        &self,
+    ) -> Result<HashMap<u64, String>, SteamUtilError> {
+        const USER_FORCED_PRIORITY: u32 = 250;
+
+        let steam_config_file = self.steam_path.join("config").join("config.vdf");
+
+        if !steam_config_file.exists() {
+            return Err(SteamUtilError::SteamConfigVdfNotFound);
+        }
+
+        let config = fs::read_to_string(&steam_config_file)
+            .map_err(|_| SteamUtilError::SteamConfigVdfNotFound)?;
+
+        let config_vdf = Vdf::parse(&config).map_err(|_| {
+            SteamUtilError::VdfParsingError(steam_config_file.to_string_lossy().to_string())
+        })?;
+
+        let software_vdf_obj = config_vdf
+            .value
+            .get_obj()
+            .and_then(|config| config.get("Software"))
+            .and_then(|o| o.first())
+            .and_then(|f| f.get_obj())
+            .ok_or_else(|| {
+                SteamUtilError::VdfMissingEntry("Software object not found".to_string())
+            })?;
+
+        let valve_vdf_obj = software_vdf_obj
+            .get("Valve")
+            .or(software_vdf_obj.get("valve"))
+            .and_then(|valve_obj| valve_obj.first())
+            .and_then(|o| o.get_obj())
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("Valve object not found".to_string()))?;
+
+        let steam_obj = valve_vdf_obj
+            .get("Steam")
+            .and_then(|steam| steam.first())
+            .and_then(|o| o.get_obj())
+            .ok_or_else(|| SteamUtilError::VdfMissingEntry("Steam object not found".to_string()))?;
+
+        let Some(compat_tool_mapping_values) = steam_obj.get("CompatToolMapping") else {
+            return Ok(HashMap::new());
+        };
+        let compat_tool_mapping = compat_tool_mapping_values
+            .first()
+            .and_then(|value| value.get_obj())
+            .ok_or_else(|| {
+                SteamUtilError::VdfMissingEntry("CompatToolMapping object is malformed".to_string())
+            })?;
+
+        let mut forced_mappings = HashMap::new();
+        for (raw_app_id, values) in compat_tool_mapping.iter() {
+            let app_id = match raw_app_id.parse::<u64>() {
+                Ok(app_id) => app_id,
+                Err(_) => {
+                    warn!(
+                        "Skipping malformed Steam compatibility mapping app ID: {}",
+                        raw_app_id
+                    );
+                    continue;
+                }
+            };
+
+            // App ID 0 represents Steam's global default rather than an application override.
+            if app_id == 0 {
+                continue;
+            }
+
+            let Some(mapping) = values.first().and_then(|value| value.get_obj()) else {
+                warn!(
+                    "Skipping malformed Steam compatibility mapping for app ID {}",
+                    app_id
+                );
+                continue;
+            };
+
+            let Some(name) = mapping
+                .get("name")
+                .and_then(|values| values.first())
+                .and_then(|value| value.get_str())
+            else {
+                warn!(
+                    "Skipping Steam compatibility mapping with no tool name for app ID {}",
+                    app_id
+                );
+                continue;
+            };
+            if name.is_empty() {
+                continue;
+            }
+
+            let Some(raw_priority) = mapping
+                .get("priority")
+                .and_then(|values| values.first())
+                .and_then(|value| value.get_str())
+            else {
+                warn!(
+                    "Skipping Steam compatibility mapping with no priority for app ID {}",
+                    app_id
+                );
+                continue;
+            };
+
+            let priority = match raw_priority.parse::<u32>() {
+                Ok(priority) => priority,
+                Err(_) => {
+                    warn!(
+                        "Skipping Steam compatibility mapping with invalid priority for app ID {}",
+                        app_id
+                    );
+                    continue;
+                }
+            };
+
+            if priority == USER_FORCED_PRIORITY {
+                forced_mappings.insert(app_id, name.to_string());
+            }
+        }
+
+        Ok(forced_mappings)
     }
 
     pub fn list_library_folders(&self) -> Result<Vec<PathBuf>, SteamUtilError> {
@@ -579,6 +709,101 @@ mod tests {
                 .expect("Expected mapping for app ID 654321 not found"),
             "Sample Compatibility Tool 2"
         );
+    }
+
+    #[test]
+    fn test_get_forced_compatibility_tools_mappings_only_returns_user_overrides() {
+        let steam_dir = create_test_steam_directory();
+        let steam_root = steam_dir.path().join("root");
+        fs::write(
+            steam_root.join("config").join("config.vdf"),
+            r#""InstallConfigStore"
+            {
+                "Software"
+                {
+                    "Valve"
+                    {
+                        "Steam"
+                        {
+                            "CompatToolMapping"
+                            {
+                                "0"
+                                {
+                                    "name" "global-default"
+                                    "priority" "250"
+                                }
+                                "101"
+                                {
+                                    "name" "user-forced-tool"
+                                    "priority" "250"
+                                }
+                                "102"
+                                {
+                                    "name" "automatic-tool"
+                                    "priority" "100"
+                                }
+                                "not-an-app-id"
+                                {
+                                    "name" "ignored-tool"
+                                    "priority" "250"
+                                }
+                                "103" "not-an-object"
+                                "104"
+                                {
+                                    "priority" "250"
+                                }
+                                "105"
+                                {
+                                    "name" "missing-priority"
+                                }
+                                "106"
+                                {
+                                    "name" "invalid-priority"
+                                    "priority" "high"
+                                }
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .expect("Failed to write config file");
+
+        let mappings = SteamUtil::new(steam_root)
+            .get_forced_compatibility_tools_mappings()
+            .expect("Failed to get forced compatibility tool mappings");
+
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings.get(&101), Some(&"user-forced-tool".to_string()));
+    }
+
+    #[test]
+    fn test_get_forced_compatibility_tools_mappings_allows_absent_mapping() {
+        let steam_dir = create_test_steam_directory();
+        let steam_root = steam_dir.path().join("root");
+        fs::write(
+            steam_root.join("config").join("config.vdf"),
+            r#""InstallConfigStore"
+            {
+                "Software"
+                {
+                    "Valve"
+                    {
+                        "Steam"
+                        {
+                            "SomeOtherSetting" "1"
+                        }
+                    }
+                }
+            }"#,
+        )
+        .expect("Failed to write config file");
+
+        let mappings = SteamUtil::new(steam_root)
+            .get_forced_compatibility_tools_mappings()
+            .expect("Absent compatibility mappings should be valid");
+
+        assert!(mappings.is_empty());
     }
 
     #[test]

@@ -114,7 +114,7 @@ function ProjectInformation() {
           verticalAlignment={"center"}
         >
           <Focusable
-            flow-children="right"
+            flow-children="row"
             style={{
               marginLeft: "auto",
               boxShadow: "none",

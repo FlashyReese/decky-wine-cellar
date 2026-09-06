@@ -64,6 +64,80 @@ export interface InstallFolder {
   vecApps: AppInfo[];
 }
 
+export type ManagedSteamApplication = {
+  appId: number;
+  name: string;
+  sortAs: string;
+  iconUrl?: string;
+  isShortcut: boolean;
+};
+
+export type ManagedApplicationInventory = {
+  applications: ManagedSteamApplication[];
+  warning?: string;
+};
+
+type ManagedAppOverview = {
+  appid: number;
+  app_type: number;
+  display_name?: string;
+  sort_as?: string;
+  BIsShortcut?: () => boolean;
+};
+
+type ManagedAppStore = {
+  allApps?: readonly ManagedAppOverview[] | Iterable<ManagedAppOverview>;
+  GetAppOverviewByAppID?: (
+    appId: number,
+  ) => ManagedAppOverview | null | undefined;
+  GetIconURLForApp?: (app: ManagedAppOverview) => string | null | undefined;
+};
+
+type InstalledAppMetadata = {
+  name: string;
+  sortAs: string;
+};
+
+const SHORTCUT_APP_TYPE = 1_073_741_824;
+const COMPAT_TOOLS_TIMEOUT_MS = 5_000;
+
+function getAppOverviews(appStore: ManagedAppStore): {
+  overviews: ManagedAppOverview[];
+  isComplete: boolean;
+} {
+  try {
+    return appStore.allApps == null
+      ? { overviews: [], isComplete: false }
+      : { overviews: Array.from(appStore.allApps), isComplete: true };
+  } catch (error) {
+    console.error("Unable to read Steam application inventory:", error);
+    return { overviews: [], isComplete: false };
+  }
+}
+
+function getAppOverview(
+  appStore: ManagedAppStore,
+  appId: number,
+): ManagedAppOverview | undefined {
+  try {
+    return appStore.GetAppOverviewByAppID?.call(appStore, appId) ?? undefined;
+  } catch (error) {
+    console.error(`Unable to read Steam application ${appId}:`, error);
+    return undefined;
+  }
+}
+
+function isShortcut(overview: ManagedAppOverview): boolean {
+  const appTypeFallback = overview.app_type === SHORTCUT_APP_TYPE;
+
+  try {
+    return overview.BIsShortcut?.() ?? appTypeFallback;
+  } catch (error) {
+    console.error(`Unable to identify Steam shortcut ${overview.appid}:`, error);
+    return appTypeFallback;
+  }
+}
+
 /**
  * Retrieves a list of available compatibility tools for all applications.
  * @returns A Promise that resolves to an array of CompatToolInfo objects.
@@ -79,6 +153,38 @@ export async function GetGlobalCompatTools(): Promise<CompatToolInfo[]> {
     // If an error occurs during the API call, log the error and return an empty array
     console.error("Error:", error);
     return [];
+  }
+}
+
+/**
+ * Retrieves the compatibility tools Steam allows for a specific application.
+ * Unlike the global helper, failures are allowed to propagate so callers can
+ * distinguish an unavailable menu from an application with no compatible tools.
+ */
+export async function GetAvailableCompatTools(
+  appId: number,
+): Promise<CompatToolInfo[]> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    const response = await Promise.race([
+      SteamClient.Apps.GetAvailableCompatTools(appId),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("Steam did not return compatible tools in time.")),
+          COMPAT_TOOLS_TIMEOUT_MS,
+        );
+      }),
+    ]);
+
+    return response.map((tool) => ({
+      strToolName: tool.strToolName,
+      strDisplayName: tool.strDisplayName,
+    }));
+  } finally {
+    if (timeout != null) {
+      clearTimeout(timeout);
+    }
   }
 }
 
@@ -99,6 +205,133 @@ export async function GetInstallFolders(): Promise<InstallFolder[]> {
     console.error("Error:", error);
     return [];
   }
+}
+
+/**
+ * Retrieves installed Steam games and library shortcuts without changing their
+ * compatibility settings.
+ * @returns Applications plus a warning when Steam's shortcut inventory is not ready.
+ */
+export async function GetManagedApplications(): Promise<
+  ManagedApplicationInventory
+> {
+  const installedApps = new Map<number, InstalledAppMetadata>();
+  // This intentionally bypasses the forgiving public GetInstallFolders helper:
+  // callers of this page-specific inventory need to surface an RPC failure
+  // instead of presenting it as an empty library.
+  const installFolders = await SteamClient.InstallFolder.GetInstallFolders();
+
+  for (const folder of installFolders) {
+    for (const app of folder.vecApps) {
+      if (!Number.isSafeInteger(app.nAppID) || app.nAppID <= 0) {
+        continue;
+      }
+
+      installedApps.set(app.nAppID, {
+        name: app.strAppName,
+        sortAs: app.strSortAs,
+      });
+    }
+  }
+
+  const appStore = window.appStore as unknown as ManagedAppStore | undefined;
+  let isPartialInventory = appStore == null;
+
+  const overviewsById = new Map<number, ManagedAppOverview>();
+  if (appStore != null) {
+    const overviewInventory = getAppOverviews(appStore);
+    isPartialInventory = !overviewInventory.isComplete;
+    for (const overview of overviewInventory.overviews) {
+      if (Number.isSafeInteger(overview.appid) && overview.appid > 0) {
+        overviewsById.set(overview.appid, overview);
+      }
+    }
+
+    // allApps is the only reliable source for every non-Steam shortcut. Fill in
+    // missing installed games individually when that collection is unavailable
+    // or has not finished populating yet.
+    for (const appId of installedApps.keys()) {
+      if (!overviewsById.has(appId)) {
+        const overview = getAppOverview(appStore, appId);
+        if (overview != null) {
+          overviewsById.set(appId, overview);
+        }
+      }
+    }
+  }
+
+  const applications = new Map<
+    number,
+    { overview?: ManagedAppOverview; isShortcut: boolean }
+  >();
+  for (const overview of overviewsById.values()) {
+    const shortcut = isShortcut(overview);
+    const isInstalledGame =
+      overview.app_type === 1 && installedApps.has(overview.appid);
+
+    if (shortcut || isInstalledGame) {
+      applications.set(overview.appid, {
+        overview,
+        isShortcut: shortcut,
+      });
+    }
+  }
+
+  // Steam's overview store is populated lazily during startup. Retain an
+  // installed-folder fallback so a temporarily missing overview does not make
+  // an installed game disappear from the page; a later refresh enriches it.
+  for (const appId of installedApps.keys()) {
+    if (!overviewsById.has(appId)) {
+      applications.set(appId, { isShortcut: false });
+    }
+  }
+
+  const managedApplications = Array.from(applications.entries()).map(
+    ([appId, { overview, isShortcut: shortcut }]) => {
+      const installedMetadata = installedApps.get(appId);
+      const name =
+        overview?.display_name || installedMetadata?.name || String(appId);
+      const sortAs = overview?.sort_as || installedMetadata?.sortAs || name;
+
+      let iconUrl: string | undefined;
+      if (appStore != null && overview != null) {
+        try {
+          iconUrl =
+            appStore.GetIconURLForApp?.call(appStore, overview) || undefined;
+        } catch (error) {
+          console.error(
+            `Unable to read the icon for Steam application ${appId}:`,
+            error,
+          );
+        }
+      }
+
+      return {
+        appId,
+        name,
+        sortAs,
+        iconUrl,
+        isShortcut: shortcut,
+      };
+    },
+  );
+
+  const collator = new Intl.Collator(undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+  const sortedApplications = managedApplications.sort(
+    (left, right) =>
+      collator.compare(left.sortAs || left.name, right.sortAs || right.name) ||
+      left.appId - right.appId,
+  );
+
+  return {
+    applications: sortedApplications,
+    warning: isPartialInventory
+      ? "Steam's shortcut catalog is still loading. Installed Steam titles are shown; refresh to include non-Steam shortcuts."
+      : undefined,
+  };
 }
 
 /**

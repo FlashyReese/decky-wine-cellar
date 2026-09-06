@@ -16,6 +16,7 @@ use tokio::sync::{Mutex, Notify};
 use tokio_tungstenite::tungstenite::Message;
 
 const DOWNLOAD_PROGRESS_BROADCAST_INTERVAL: Duration = Duration::from_millis(200);
+const APP_COMPAT_TOOL_MAPPINGS_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 
 pub struct WineCask {
     pub steam_util: SteamUtil,
@@ -36,14 +37,19 @@ pub struct AppState {
     pub catalog_flavors: Vec<Flavor>,
     pub installed_tools: Vec<InstalledCompatibilityTool>,
     pub virtual_tools: Vec<VirtualCompatibilityTool>,
+    pub app_compat_tool_mappings: HashMap<u64, String>,
+    pub app_compat_tool_mappings_stale: bool,
     pub current_operation: Option<OperationInfo>,
     pub queued_operations: Vec<OperationInfo>,
     pub updater_state: UpdaterState,
     pub updater_last_check: Option<u64>,
-    #[serde(skip)]
     pub steam_visible_tools: Vec<SteamClientCompatToolInfo>,
     #[serde(skip)]
     pub operation_queue: VecDeque<QueuedCommand>,
+    #[serde(skip)]
+    pub app_compat_tool_mappings_last_refresh_attempt: Option<Instant>,
+    #[serde(skip)]
+    pub app_compat_tool_mappings_refresh_in_progress: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -733,7 +739,67 @@ impl WineCask {
         self.broadcast_app_state(peer_map).await;
     }
 
+    pub async fn refresh_app_compat_tool_mappings(&self) {
+        let now = Instant::now();
+        let should_refresh = {
+            let mut app_state = self.app_state.lock().await;
+            let was_recently_attempted = app_state
+                .app_compat_tool_mappings_last_refresh_attempt
+                .is_some_and(|last_attempt| {
+                    now.saturating_duration_since(last_attempt)
+                        < APP_COMPAT_TOOL_MAPPINGS_REFRESH_INTERVAL
+                });
+
+            if app_state.app_compat_tool_mappings_refresh_in_progress || was_recently_attempted {
+                false
+            } else {
+                app_state.app_compat_tool_mappings_last_refresh_attempt = Some(now);
+                app_state.app_compat_tool_mappings_refresh_in_progress = true;
+                true
+            }
+        };
+
+        if !should_refresh {
+            return;
+        }
+
+        // config.vdf may live on slow or unhealthy storage. Keep its synchronous file read and
+        // VDF parsing off the async runtime, while the in-progress flag prevents concurrent reads.
+        let steam_util = self.steam_util.clone();
+        let refresh_result = tokio::task::spawn_blocking(move || {
+            steam_util.get_forced_compatibility_tools_mappings()
+        })
+        .await;
+
+        let mut app_state = self.app_state.lock().await;
+        app_state.app_compat_tool_mappings_refresh_in_progress = false;
+        match refresh_result {
+            Ok(Ok(mappings)) => {
+                app_state.app_compat_tool_mappings = mappings;
+                app_state.app_compat_tool_mappings_stale = false;
+            }
+            Ok(Err(err)) => {
+                // A transient read or parse failure must not erase assignments already shown to
+                // the frontend. A later refresh can replace this last-known-good snapshot.
+                app_state.app_compat_tool_mappings_stale = true;
+                warn!(
+                    "Failed to refresh forced compatibility tool mappings; retaining last known state: {}",
+                    err
+                );
+            }
+            Err(err) => {
+                app_state.app_compat_tool_mappings_stale = true;
+                error!(
+                    "Compatibility tool mapping refresh task failed; retaining last known state: {}",
+                    err
+                );
+            }
+        }
+    }
+
     pub async fn sync_backend_state(&self) {
+        self.refresh_app_compat_tool_mappings().await;
+
         let (catalog_flavors, steam_visible_tools) = {
             let app_state = self.app_state.lock().await;
             (
@@ -1053,6 +1119,34 @@ mod tests {
         }
     }
 
+    fn mapping_test_app(
+        steam_path: PathBuf,
+        mappings: HashMap<u64, String>,
+        mappings_stale: bool,
+    ) -> WineCask {
+        WineCask {
+            steam_util: SteamUtil::new(steam_path.clone()),
+            app_state: Arc::new(Mutex::new(AppState {
+                catalog_flavors: Vec::new(),
+                installed_tools: Vec::new(),
+                virtual_tools: Vec::new(),
+                app_compat_tool_mappings: mappings,
+                app_compat_tool_mappings_stale: mappings_stale,
+                current_operation: None,
+                queued_operations: Vec::new(),
+                updater_state: UpdaterState::Idle,
+                updater_last_check: None,
+                steam_visible_tools: Vec::new(),
+                operation_queue: VecDeque::new(),
+                app_compat_tool_mappings_last_refresh_attempt: None,
+                app_compat_tool_mappings_refresh_in_progress: false,
+            })),
+            operation_broadcast_cache: Arc::new(Mutex::new(None)),
+            queue_notify: Arc::new(Notify::new()),
+            virtual_tool_manifest_path: steam_path.join("virtual_tools.json"),
+        }
+    }
+
     #[test]
     fn skips_identical_operation_snapshots() {
         let now = Instant::now();
@@ -1118,6 +1212,90 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn compatibility_mapping_refresh_retains_last_good_state_on_read_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let existing_mappings = HashMap::from([(123_u64, "known-tool".to_string())]);
+        let app = mapping_test_app(
+            directory.path().to_path_buf(),
+            existing_mappings.clone(),
+            false,
+        );
+
+        app.refresh_app_compat_tool_mappings().await;
+
+        let app_state = app.app_state.lock().await;
+        assert_eq!(app_state.app_compat_tool_mappings, existing_mappings);
+        assert!(app_state.app_compat_tool_mappings_stale);
+        assert!(!app_state.app_compat_tool_mappings_refresh_in_progress);
+    }
+
+    #[tokio::test]
+    async fn compatibility_mapping_refresh_clears_stale_state_on_success() {
+        let directory = tempfile::tempdir().unwrap();
+        let config_directory = directory.path().join("config");
+        std::fs::create_dir(&config_directory).unwrap();
+        std::fs::write(
+            config_directory.join("config.vdf"),
+            r#""InstallConfigStore"
+            {
+                "Software"
+                {
+                    "Valve"
+                    {
+                        "Steam"
+                        {
+                            "CompatToolMapping"
+                            {
+                                "123"
+                                {
+                                    "name" "forced-tool"
+                                    "priority" "250"
+                                }
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let app = mapping_test_app(directory.path().to_path_buf(), HashMap::new(), true);
+
+        app.refresh_app_compat_tool_mappings().await;
+
+        let app_state = app.app_state.lock().await;
+        assert_eq!(
+            app_state.app_compat_tool_mappings.get(&123),
+            Some(&"forced-tool".to_string())
+        );
+        assert!(!app_state.app_compat_tool_mappings_stale);
+        assert!(!app_state.app_compat_tool_mappings_refresh_in_progress);
+    }
+
+    #[tokio::test]
+    async fn compatibility_mapping_refresh_throttles_rapid_attempts() {
+        let directory = tempfile::tempdir().unwrap();
+        let app = mapping_test_app(directory.path().to_path_buf(), HashMap::new(), false);
+
+        app.refresh_app_compat_tool_mappings().await;
+        let first_attempt = app
+            .app_state
+            .lock()
+            .await
+            .app_compat_tool_mappings_last_refresh_attempt;
+
+        // Use the stale bit as a sentinel: another failed read would set it back to true.
+        app.app_state.lock().await.app_compat_tool_mappings_stale = false;
+        app.refresh_app_compat_tool_mappings().await;
+
+        let app_state = app.app_state.lock().await;
+        assert_eq!(
+            app_state.app_compat_tool_mappings_last_refresh_attempt,
+            first_attempt
+        );
+        assert!(!app_state.app_compat_tool_mappings_stale);
+    }
+
+    #[tokio::test]
     async fn download_statistics_clear_on_extraction_and_cancellation() {
         let directory = tempfile::tempdir().unwrap();
         let app = WineCask {
@@ -1126,12 +1304,16 @@ mod tests {
                 catalog_flavors: Vec::new(),
                 installed_tools: Vec::new(),
                 virtual_tools: Vec::new(),
+                app_compat_tool_mappings: HashMap::new(),
+                app_compat_tool_mappings_stale: true,
                 current_operation: Some(operation(OperationState::Downloading, 0)),
                 queued_operations: Vec::new(),
                 updater_state: UpdaterState::Idle,
                 updater_last_check: None,
                 steam_visible_tools: Vec::new(),
                 operation_queue: VecDeque::new(),
+                app_compat_tool_mappings_last_refresh_attempt: None,
+                app_compat_tool_mappings_refresh_in_progress: false,
             })),
             operation_broadcast_cache: Arc::new(Mutex::new(None)),
             queue_notify: Arc::new(Notify::new()),

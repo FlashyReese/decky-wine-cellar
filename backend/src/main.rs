@@ -20,7 +20,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, Notify};
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{
+    handshake::server::{ErrorResponse, Request, Response},
+    http::{header::ORIGIN, StatusCode},
+    Message,
+};
+
+const STEAM_LOOPBACK_ORIGIN: &[u8] = b"https://steamloopback.host";
 
 type Tx = UnboundedSender<Message>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
@@ -41,12 +47,16 @@ async fn main() -> Result<(), IoError> {
         catalog_flavors: Vec::new(),
         installed_tools: Vec::new(),
         virtual_tools: Vec::new(),
+        app_compat_tool_mappings: HashMap::new(),
+        app_compat_tool_mappings_stale: true,
         current_operation: None,
         queued_operations: Vec::new(),
         updater_state: UpdaterState::Idle,
         updater_last_check: None,
         steam_visible_tools: Vec::new(),
         operation_queue: VecDeque::new(),
+        app_compat_tool_mappings_last_refresh_attempt: None,
+        app_compat_tool_mappings_refresh_in_progress: false,
     }));
 
     let wine_cask = WineCask {
@@ -99,13 +109,17 @@ async fn handle_connection(
 ) {
     info!("Incoming TCP connection from: {}", addr);
 
-    let ws_stream = match tokio_tungstenite::accept_async(raw_stream).await {
-        Ok(stream) => stream,
-        Err(err) => {
-            error!("WebSocket handshake failed for {}: {}", addr, err);
-            return;
-        }
-    };
+    let ws_stream =
+        match tokio_tungstenite::accept_hdr_async(raw_stream, validate_websocket_origin).await {
+            Ok(stream) => stream,
+            Err(err) => {
+                warn!(
+                    "WebSocket handshake rejected or failed for {}: {}",
+                    addr, err
+                );
+                return;
+            }
+        };
     info!("WebSocket connection established: {}", addr);
 
     let (tx, rx) = unbounded();
@@ -141,6 +155,25 @@ async fn handle_connection(
 
     info!("{} disconnected", &addr);
     peer_map.lock().await.remove(&addr);
+}
+
+fn validate_websocket_origin(
+    request: &Request,
+    response: Response,
+) -> Result<Response, ErrorResponse> {
+    let mut origins = request.headers().get_all(ORIGIN).iter();
+    let origin_is_allowed = origins
+        .next()
+        .is_some_and(|origin| origin.as_bytes() == STEAM_LOOPBACK_ORIGIN)
+        && origins.next().is_none();
+
+    if origin_is_allowed {
+        return Ok(response);
+    }
+
+    let mut rejection = ErrorResponse::new(Some("Forbidden".to_string()));
+    *rejection.status_mut() = StatusCode::FORBIDDEN;
+    Err(rejection)
 }
 
 fn configure_logger() -> Result<(), IoError> {
@@ -211,6 +244,7 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
 
     match request.r#type {
         MessageType::GetState => {
+            wine_cask.refresh_app_compat_tool_mappings().await;
             wine_cask.broadcast_app_state(peer_map).await;
         }
         MessageType::ReportSteamVisibleTools => {
@@ -275,5 +309,70 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
             }
         }
         MessageType::UpdateState | MessageType::UpdateOperations | MessageType::Notification => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request_with_origin(origin: Option<&str>) -> Request {
+        let mut request = Request::new(());
+        if let Some(origin) = origin {
+            request
+                .headers_mut()
+                .insert(ORIGIN, origin.parse().expect("test Origin must be valid"));
+        }
+        request
+    }
+
+    #[test]
+    fn accepts_the_steam_loopback_origin() {
+        let request = request_with_origin(Some("https://steamloopback.host"));
+
+        assert!(validate_websocket_origin(&request, Response::new(())).is_ok());
+    }
+
+    #[test]
+    fn rejects_a_different_origin() {
+        let request = request_with_origin(Some("https://example.com"));
+
+        let rejection = validate_websocket_origin(&request, Response::new(()))
+            .expect_err("a foreign Origin must be rejected");
+        assert_eq!(rejection.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn rejects_a_missing_origin() {
+        let request = request_with_origin(None);
+
+        let rejection = validate_websocket_origin(&request, Response::new(()))
+            .expect_err("a missing Origin must be rejected");
+        assert_eq!(rejection.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn rejects_origin_lookalikes_and_default_port_variants() {
+        for origin in [
+            "https://steamloopback.host.example.com",
+            "https://steamloopback.host:443",
+            "http://steamloopback.host",
+        ] {
+            let request = request_with_origin(Some(origin));
+            assert!(validate_websocket_origin(&request, Response::new(())).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_multiple_origin_headers() {
+        let mut request = request_with_origin(Some("https://steamloopback.host"));
+        request.headers_mut().append(
+            ORIGIN,
+            "https://example.com"
+                .parse()
+                .expect("test Origin must be valid"),
+        );
+
+        assert!(validate_websocket_origin(&request, Response::new(())).is_err());
     }
 }

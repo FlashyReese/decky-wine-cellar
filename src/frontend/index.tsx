@@ -6,6 +6,7 @@ import { log } from "../utils/logger";
 import { reportSteamVisibleTools, requestState } from "../utils/backendApi";
 import { parseBackendMessage } from "../utils/backendMessages";
 import About from "./about";
+import ApplicationsTab from "./applications";
 import FlavorTab from "./flavorTab";
 import ManagerTab from "./manager";
 
@@ -92,12 +93,16 @@ export default function ManagePage() {
   }, []);
 
   const pages: (SidebarNavigationPage | "separator")[] = [];
-
   if (appState != null && socket != null) {
     pages.push({
       title: "Dashboard",
       content: <ManagerTab appState={appState} socket={socket} />,
       route: "/wine-cellar/dashboard",
+    });
+    pages.push({
+      title: "Applications",
+      content: <ApplicationsTab appState={appState} socket={socket} />,
+      route: "/wine-cellar/applications",
     });
 
     appState.catalog_flavors.forEach((flavor) => {

@@ -118,6 +118,9 @@ export type AppState = {
   catalog_flavors: Flavor[];
   installed_tools: InstalledCompatibilityTool[];
   virtual_tools: VirtualCompatibilityTool[];
+  app_compat_tool_mappings: Record<string, string>;
+  app_compat_tool_mappings_stale: boolean;
+  steam_visible_tools: CompatToolInfo[];
   current_operation?: OperationInfo;
   queued_operations: OperationInfo[];
   updater_state: UpdaterState;
