@@ -100,6 +100,19 @@ type InstalledAppMetadata = {
 
 const SHORTCUT_APP_TYPE = 1_073_741_824;
 const COMPAT_TOOLS_TIMEOUT_MS = 5_000;
+const MAX_STEAM_APP_ID = 0xffff_ffff;
+
+function isValidSteamAppId(appId: number): boolean {
+  return (
+    Number.isSafeInteger(appId) && appId > 0 && appId <= MAX_STEAM_APP_ID
+  );
+}
+
+function assertValidSteamAppId(appId: number): void {
+  if (!isValidSteamAppId(appId)) {
+    throw new RangeError(`Invalid Steam application ID: ${String(appId)}`);
+  }
+}
 
 function getAppOverviews(appStore: ManagedAppStore): {
   overviews: ManagedAppOverview[];
@@ -164,6 +177,7 @@ export async function GetGlobalCompatTools(): Promise<CompatToolInfo[]> {
 export async function GetAvailableCompatTools(
   appId: number,
 ): Promise<CompatToolInfo[]> {
+  assertValidSteamAppId(appId);
   let timeout: ReturnType<typeof setTimeout> | undefined;
 
   try {
@@ -223,7 +237,7 @@ export async function GetManagedApplications(): Promise<
 
   for (const folder of installFolders) {
     for (const app of folder.vecApps) {
-      if (!Number.isSafeInteger(app.nAppID) || app.nAppID <= 0) {
+      if (!isValidSteamAppId(app.nAppID)) {
         continue;
       }
 
@@ -242,7 +256,7 @@ export async function GetManagedApplications(): Promise<
     const overviewInventory = getAppOverviews(appStore);
     isPartialInventory = !overviewInventory.isComplete;
     for (const overview of overviewInventory.overviews) {
-      if (Number.isSafeInteger(overview.appid) && overview.appid > 0) {
+      if (isValidSteamAppId(overview.appid)) {
         overviewsById.set(overview.appid, overview);
       }
     }
@@ -360,6 +374,7 @@ export function SpecifyCompatToolWithInfo(
  * @param toolName The name of the compatibility tool to specify.
  */
 export function SpecifyCompatTool(appId: number, toolName: string): void {
+  assertValidSteamAppId(appId);
   SteamClient.Apps.SpecifyCompatTool(appId, toolName);
 }
 
