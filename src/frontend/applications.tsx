@@ -3,6 +3,7 @@ import {
   DialogButton,
   DialogControlsSection,
   DialogControlsSectionHeader,
+  DialogLabel,
   Dropdown,
   Field,
   Focusable,
@@ -513,18 +514,18 @@ export default function ApplicationsTab({
             disabled until Refresh succeeds.
           </div>
         )}
+        <DialogLabel>Search applications</DialogLabel>
         <Focusable
           flow-children="row"
           style={{
             display: "flex",
-            alignItems: "flex-end",
+            alignItems: "center",
             flexWrap: "wrap",
             gap: "10px",
           }}
         >
           <div style={{ flex: "1 1 280px", minWidth: 0 }}>
             <TextField
-              label="Search applications"
               aria-label="Search installed Steam games and non-Steam shortcuts"
               value={search}
               bShowClearAction
