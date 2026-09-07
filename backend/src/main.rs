@@ -227,6 +227,12 @@ fn get_virtual_tool_manifest_path() -> PathBuf {
 }
 
 async fn initialize_app_state(wine_cask: &WineCask) {
+    if let Err(err) = wine_cask.reconcile_virtual_tool_payload_transactions() {
+        error!(
+            "Failed to reconcile interrupted virtual tool operation: {}",
+            err
+        );
+    }
     wine_cask.sync_backend_state().await;
 }
 
@@ -270,6 +276,18 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
                     Command::InstallCatalogRelease { release_id, target } => {
                         wine_cask
                             .queue_install_catalog_release(release_id, target, peer_map)
+                            .await;
+                    }
+                    Command::LinkInstalledToolToVirtualTool {
+                        installed_tool_id,
+                        virtual_tool_id,
+                    } => {
+                        wine_cask
+                            .queue_link_installed_tool_to_virtual_tool(
+                                installed_tool_id,
+                                virtual_tool_id,
+                                peer_map,
+                            )
                             .await;
                     }
                     Command::UninstallInstalledTool { installed_tool_id } => {

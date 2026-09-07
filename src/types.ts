@@ -57,6 +57,7 @@ export type InstalledCompatibilityTool = {
   source: InstalledToolSource;
   virtual_tool_id?: string;
   user_label?: string;
+  can_link_to_virtual_tool?: boolean;
 };
 
 export type VirtualCompatibilityTool = {
@@ -69,12 +70,15 @@ export type VirtualCompatibilityTool = {
   current_payload_name?: string;
   current_payload_flavor: CompatibilityToolFlavor;
   github_release?: GitHubRelease;
+  linked_source_installed_tool_id?: string;
+  linked_source_missing: boolean;
   requires_restart: boolean;
   used_by_games: string[];
 };
 
 export enum OperationKind {
   Install = "Install",
+  Link = "Link",
   Uninstall = "Uninstall",
   CreateVirtualTool = "CreateVirtualTool",
   RenameVirtualTool = "RenameVirtualTool",
@@ -144,6 +148,7 @@ export type InstallTarget =
 export enum CommandType {
   RefreshCatalog = "RefreshCatalog",
   InstallCatalogRelease = "InstallCatalogRelease",
+  LinkInstalledToolToVirtualTool = "LinkInstalledToolToVirtualTool",
   UninstallInstalledTool = "UninstallInstalledTool",
   CancelOperation = "CancelOperation",
   CreateVirtualTool = "CreateVirtualTool",
@@ -159,6 +164,11 @@ export type Command =
       type: CommandType.InstallCatalogRelease;
       release_id: string;
       target: InstallTarget;
+    }
+  | {
+      type: CommandType.LinkInstalledToolToVirtualTool;
+      installed_tool_id: string;
+      virtual_tool_id: string;
     }
   | {
       type: CommandType.UninstallInstalledTool;

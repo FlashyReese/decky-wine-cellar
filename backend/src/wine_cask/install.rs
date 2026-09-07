@@ -2,13 +2,17 @@ use crate::github_util::{Asset, Release};
 use crate::wine_cask::app::{InstallTarget, OperationState, WineCask};
 use crate::wine_cask::download_progress::DownloadProgressTracker;
 use crate::wine_cask::flavors::{CatalogRelease, CompatibilityToolFlavor};
+use crate::wine_cask::virtual_tools::{
+    ensure_virtual_tool_directory_accessible, safe_manifest_child_path,
+    write_virtualized_compatibility_tool_vdf,
+};
 use crate::wine_cask::{generate_compatibility_tool_vdf, recursive_delete_dir_entry};
 use crate::PeerMap;
 use flate2::bufread::GzDecoder;
 use futures_util::StreamExt;
 use log::{error, info, warn};
 use std::fs::{create_dir_all, File};
-use std::io::{BufReader, Read};
+use std::io::{BufReader, ErrorKind, Read};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 use tokio::fs::File as TokioFile;
@@ -269,6 +273,8 @@ impl WineCask {
             }
             Err(err) => {
                 error!("Installation failed: {}", err);
+                self.sync_backend_state().await;
+                self.broadcast_app_state(peer_map).await;
                 self.broadcast_notification(peer_map, &err).await;
             }
         }
@@ -352,6 +358,7 @@ impl WineCask {
             InstallTarget::Direct => self.install_direct_tool(&extracted_directory, install_plan),
             InstallTarget::VirtualTool { virtual_tool_id } => {
                 self.install_virtual_tool(&extracted_directory, install_plan, virtual_tool_id)
+                    .await
             }
         }
     }
@@ -426,13 +433,14 @@ impl WineCask {
         ))
     }
 
-    fn install_virtual_tool(
+    async fn install_virtual_tool(
         &self,
         extracted_directory: &Path,
         install_plan: &InstallPlan,
         virtual_tool_id: &str,
     ) -> Result<String, String> {
-        let manifest = self.load_virtual_tool_manifest();
+        self.reconcile_virtual_tool_payload_transactions()?;
+        let manifest = self.try_load_virtual_tool_manifest()?;
         let Some(virtual_tool) = manifest
             .tools
             .iter()
@@ -441,66 +449,139 @@ impl WineCask {
             return Err("Virtual compatibility tool no longer exists".to_string());
         };
 
-        let target_directory = self
+        let compatibility_tools_directory = self
             .steam_util
             .get_steam_compatibility_tools_directory()
-            .join(&virtual_tool.directory_name);
+            .canonicalize()
+            .map_err(|err| format!("Failed to access compatibility tools directory: {}", err))?;
+        let target_directory = safe_manifest_child_path(
+            &compatibility_tools_directory,
+            &virtual_tool.directory_name,
+            "virtual tool directory",
+        )?;
+        let backup_directory = safe_manifest_child_path(
+            &compatibility_tools_directory,
+            &format!(".wine-cellar-backup-{}", virtual_tool.directory_name),
+            "virtual tool backup directory",
+        )?;
 
-        let backup_directory = target_directory.with_file_name(format!(
-            ".wine-cellar-backup-{}",
-            virtual_tool.directory_name
-        ));
-        if backup_directory.exists() {
-            recursive_delete_dir_entry(&backup_directory)
-                .map_err(|err| format!("Failed to clear stale virtual tool backup: {}", err))?;
+        if path_entry_exists(&backup_directory)? {
+            validate_virtual_tool_directory(
+                &compatibility_tools_directory,
+                &backup_directory,
+                "virtual tool backup",
+            )?;
+            if path_entry_exists(&target_directory)? {
+                validate_virtual_tool_directory(
+                    &compatibility_tools_directory,
+                    &target_directory,
+                    "virtual tool",
+                )?;
+                recursive_delete_dir_entry(&backup_directory)
+                    .map_err(|err| format!("Failed to clear stale virtual tool backup: {}", err))?;
+            } else {
+                std::fs::rename(&backup_directory, &target_directory).map_err(|err| {
+                    format!(
+                        "Failed to restore interrupted virtual tool replacement: {}",
+                        err
+                    )
+                })?;
+            }
         }
 
-        let mut backup_created = false;
-        if target_directory.exists() {
-            std::fs::rename(&target_directory, &backup_directory).map_err(|err| {
+        let backup_created = path_entry_exists(&target_directory)?;
+        if backup_created {
+            validate_virtual_tool_directory(
+                &compatibility_tools_directory,
+                &target_directory,
+                "virtual tool",
+            )?;
+        }
+        self.ensure_virtual_tool_registration_compatible(
+            &extracted_directory.join("compatibilitytool.vdf"),
+            None,
+            virtual_tool,
+        )
+        .await?;
+        self.begin_virtual_tool_payload_transaction(virtual_tool_id, backup_created)
+            .map_err(|err| {
                 format!(
-                    "Failed to prepare virtual tool contents for replacement: {}",
+                    "Failed to record virtual tool replacement transaction: {}",
                     err
                 )
             })?;
-            backup_created = true;
+
+        if backup_created {
+            if let Err(err) = std::fs::rename(&target_directory, &backup_directory) {
+                let clear_result = self.clear_virtual_tool_payload_transaction(virtual_tool_id);
+                return Err(match clear_result {
+                    Ok(()) => format!(
+                        "Failed to prepare virtual tool contents for replacement: {}",
+                        err
+                    ),
+                    Err(clear_err) => format!(
+                        "Failed to prepare virtual tool contents for replacement: {}; failed to clear replacement transaction: {}",
+                        err, clear_err
+                    ),
+                });
+            }
         }
 
         let install_result = (|| {
             std::fs::rename(extracted_directory, &target_directory).map_err(|err| {
                 format!("Failed to move virtual tool contents into place: {}", err)
             })?;
-            generate_compatibility_tool_vdf(
-                target_directory.join("compatibilitytool.vdf"),
+            ensure_virtual_tool_directory_accessible(&target_directory)?;
+            let target_vdf = target_directory.join("compatibilitytool.vdf");
+            write_virtualized_compatibility_tool_vdf(
+                &target_vdf,
+                &target_vdf,
+                None,
                 &virtual_tool.steam_internal_name,
                 &virtual_tool.user_label,
             )
             .map_err(|err| format!("Failed to write virtual tool VDF: {}", err))?;
 
-            self.update_virtual_tool_payload(
+            self.update_virtual_tool_catalog_payload(
                 virtual_tool_id,
-                Some(install_plan.catalog_release.id.clone()),
+                install_plan.catalog_release.id.clone(),
+                install_plan.catalog_release.release.tag_name.clone(),
+                install_plan.catalog_release.flavor.clone(),
             )
         })();
 
         if let Err(err) = install_result {
-            if target_directory.exists() {
-                if let Err(cleanup_err) = recursive_delete_dir_entry(&target_directory) {
-                    warn!(
-                        "Failed to clean up incomplete virtual tool payload: {}",
+            let cleanup_result = match path_entry_exists(&target_directory) {
+                Ok(true) => recursive_delete_dir_entry(&target_directory).map_err(|cleanup_err| {
+                    format!(
+                        "failed to clean up incomplete virtual tool payload: {}",
                         cleanup_err
-                    );
-                }
+                    )
+                }),
+                Ok(false) => Ok(()),
+                Err(cleanup_err) => Err(cleanup_err),
+            };
+            if let Err(cleanup_err) = cleanup_result {
+                return Err(format!(
+                    "{}; {}; recovery transaction was preserved",
+                    err, cleanup_err
+                ));
             }
             if backup_created {
                 if let Err(rollback_err) = std::fs::rename(&backup_directory, &target_directory) {
                     return Err(format!(
-                        "{}; failed to restore previous virtual tool contents: {}",
+                        "{}; failed to restore previous virtual tool contents: {}; recovery transaction was preserved",
                         err, rollback_err
                     ));
                 }
             }
-            return Err(err);
+            return match self.clear_virtual_tool_payload_transaction(virtual_tool_id) {
+                Ok(()) => Err(err),
+                Err(clear_err) => Err(format!(
+                    "{}; failed to clear replacement transaction: {}",
+                    err, clear_err
+                )),
+            };
         }
 
         if backup_created {
@@ -514,6 +595,36 @@ impl WineCask {
             install_plan.catalog_release.release.tag_name, virtual_tool.user_label
         ))
     }
+}
+
+fn path_entry_exists(path: &Path) -> Result<bool, String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(format!("Failed to inspect {}: {}", path.display(), err)),
+    }
+}
+
+fn validate_virtual_tool_directory(
+    compatibility_tools_directory: &Path,
+    directory: &Path,
+    description: &str,
+) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(directory)
+        .map_err(|err| format!("Failed to inspect {}: {}", description, err))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!("Refusing to replace an invalid {}", description));
+    }
+    let canonical_directory = directory
+        .canonicalize()
+        .map_err(|err| format!("Failed to access {}: {}", description, err))?;
+    if canonical_directory.parent() != Some(compatibility_tools_directory) {
+        return Err(format!(
+            "Refusing to replace {} outside compatibilitytools.d",
+            description
+        ));
+    }
+    Ok(())
 }
 
 fn safe_unpack_tar(reader: Box<dyn Read>, destination: &Path) -> Result<(), String> {

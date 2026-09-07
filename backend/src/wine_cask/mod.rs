@@ -10,6 +10,7 @@ pub mod app;
 pub mod download_progress;
 pub mod flavors;
 pub mod install;
+pub mod link;
 pub mod uninstall;
 pub mod virtual_tools;
 
@@ -110,6 +111,21 @@ pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
                 Command::InstallCatalogRelease { release_id, target } => {
                     wine_cask
                         .install_catalog_release(release_id, target, &peer_map)
+                        .await;
+                }
+                Command::LinkInstalledToolToVirtualTool {
+                    installed_tool_id,
+                    virtual_tool_id,
+                } => {
+                    wine_cask
+                        .update_current_operation(OperationState::Running, 0, &peer_map)
+                        .await;
+                    wine_cask
+                        .link_installed_tool_to_virtual_tool(
+                            installed_tool_id,
+                            virtual_tool_id,
+                            &peer_map,
+                        )
                         .await;
                 }
                 Command::UninstallInstalledTool { installed_tool_id } => {

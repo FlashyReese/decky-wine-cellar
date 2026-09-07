@@ -4,7 +4,8 @@ use crate::wine_cask::flavors::{
     CatalogRelease, CompatibilityToolFlavor, Flavor, InstalledCompatibilityTool,
     InstalledToolSource, SteamClientCompatToolInfo, VirtualCompatibilityTool,
 };
-use crate::wine_cask::virtual_tools::normalize_virtual_tool_label;
+use crate::wine_cask::link::can_link_source_path;
+use crate::wine_cask::virtual_tools::{normalize_virtual_tool_label, VirtualToolConfig};
 use crate::PeerMap;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -92,6 +93,10 @@ pub enum Command {
         release_id: String,
         target: InstallTarget,
     },
+    LinkInstalledToolToVirtualTool {
+        installed_tool_id: String,
+        virtual_tool_id: String,
+    },
     UninstallInstalledTool {
         installed_tool_id: String,
     },
@@ -120,6 +125,7 @@ pub enum InstallTarget {
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum OperationKind {
     Install,
+    Link,
     Uninstall,
     CreateVirtualTool,
     RenameVirtualTool,
@@ -261,14 +267,23 @@ impl WineCask {
             return;
         }
 
+        let operation_conflicts = |operation: &OperationInfo| match &target {
+            InstallTarget::Direct => {
+                install_operation_matches_target(operation, &release_id, &target)
+            }
+            InstallTarget::VirtualTool { virtual_tool_id } => {
+                operation_targets_virtual_tool(operation, virtual_tool_id)
+            }
+        };
         if app_state
             .current_operation
             .as_ref()
-            .map(|operation| install_operation_matches_target(operation, &release_id, &target))
+            .map(operation_conflicts)
             .unwrap_or(false)
-            || app_state.operation_queue.iter().any(|queued| {
-                install_operation_matches_target(&queued.operation, &release_id, &target)
-            })
+            || app_state
+                .operation_queue
+                .iter()
+                .any(|queued| operation_conflicts(&queued.operation))
         {
             drop(app_state);
             self.broadcast_notification(peer_map, duplicate_install_notification_message(&target))
@@ -318,7 +333,54 @@ impl WineCask {
             .clone()
             .unwrap_or_else(|| installed_tool.display_name.clone());
 
-        let app_state = self.app_state.lock().await;
+        if matches!(&installed_tool.source, InstalledToolSource::Direct) {
+            let linked_virtual_tools = match self
+                .virtual_tools_linking_source(&installed_tool.id, &installed_tool.directory_name)
+            {
+                Ok(tools) => tools,
+                Err(err) => {
+                    error!("Cannot verify virtual tool dependencies: {}", err);
+                    self.broadcast_notification(
+                        peer_map,
+                        "Cannot safely remove this tool because virtual tool dependencies could not be verified",
+                    )
+                    .await;
+                    return;
+                }
+            };
+            if !linked_virtual_tools.is_empty() {
+                self.broadcast_notification(
+                    peer_map,
+                    &format!(
+                        "Cannot remove {}; it is linked by: {}",
+                        label,
+                        linked_virtual_tools.join(", ")
+                    ),
+                )
+                .await;
+                return;
+            }
+        } else {
+            let virtual_tool_is_tracked =
+                installed_tool
+                    .virtual_tool_id
+                    .as_deref()
+                    .and_then(|virtual_tool_id| {
+                        self.try_load_virtual_tool_manifest().ok().map(|manifest| {
+                            manifest.tools.iter().any(|tool| tool.id == virtual_tool_id)
+                        })
+                    });
+            if virtual_tool_is_tracked != Some(true) {
+                self.broadcast_notification(
+                    peer_map,
+                    "Cannot safely remove this virtual tool because its manifest could not be verified",
+                )
+                .await;
+                return;
+            }
+        }
+
+        let mut app_state = self.app_state.lock().await;
         if app_state
             .current_operation
             .as_ref()
@@ -352,8 +414,6 @@ impl WineCask {
             .await;
             return;
         }
-        drop(app_state);
-
         let queued_command = QueuedCommand {
             command: Command::UninstallInstalledTool { installed_tool_id },
             operation: OperationInfo {
@@ -369,12 +429,133 @@ impl WineCask {
             },
         };
 
-        self.app_state
-            .lock()
-            .await
+        app_state.operation_queue.push_back(queued_command);
+        app_state.queued_operations = app_state
             .operation_queue
-            .push_back(queued_command);
-        self.sync_public_queue_snapshot().await;
+            .iter()
+            .map(|queued| queued.operation.clone())
+            .collect();
+        drop(app_state);
+        self.queue_notify.notify_one();
+        self.broadcast_operation_state(peer_map).await;
+    }
+
+    pub async fn queue_link_installed_tool_to_virtual_tool(
+        &self,
+        installed_tool_id: String,
+        virtual_tool_id: String,
+        peer_map: &PeerMap,
+    ) {
+        let Some(installed_tool) = self.get_installed_tool(&installed_tool_id).await else {
+            self.broadcast_notification(peer_map, "Unknown installed tool requested")
+                .await;
+            return;
+        };
+
+        if !matches!(&installed_tool.source, InstalledToolSource::Direct) {
+            self.broadcast_notification(
+                peer_map,
+                "Only a directly installed compatibility tool can be linked",
+            )
+            .await;
+            return;
+        }
+        if !installed_tool.can_link_to_virtual_tool {
+            self.broadcast_notification(
+                peer_map,
+                "This compatibility tool cannot be linked safely",
+            )
+            .await;
+            return;
+        }
+
+        let Some(virtual_tool) = self.get_virtual_tool(&virtual_tool_id).await else {
+            self.broadcast_notification(peer_map, "Unknown virtual tool requested")
+                .await;
+            return;
+        };
+        let virtual_tool_config = match self.try_load_virtual_tool_manifest() {
+            Ok(manifest) => manifest
+                .tools
+                .into_iter()
+                .find(|tool| tool.id == virtual_tool_id),
+            Err(err) => {
+                self.broadcast_notification(
+                    peer_map,
+                    &format!("Cannot safely link compatibility tool: {}", err),
+                )
+                .await;
+                return;
+            }
+        };
+        let Some(virtual_tool_config) = virtual_tool_config else {
+            self.broadcast_notification(peer_map, "Unknown virtual tool requested")
+                .await;
+            return;
+        };
+        if let Err(err) = self
+            .ensure_virtual_tool_registration_compatible(
+                &PathBuf::from(&installed_tool.path).join("compatibilitytool.vdf"),
+                Some(&installed_tool.internal_name),
+                &virtual_tool_config,
+            )
+            .await
+        {
+            self.broadcast_notification(peer_map, &err).await;
+            return;
+        }
+
+        let mut app_state = self.app_state.lock().await;
+        let operation_conflicts = |operation: &OperationInfo| {
+            operation_targets_installed_tool(operation, &installed_tool_id)
+                || operation_targets_virtual_tool(operation, &virtual_tool_id)
+        };
+        if app_state
+            .current_operation
+            .as_ref()
+            .map(operation_conflicts)
+            .unwrap_or(false)
+            || app_state
+                .operation_queue
+                .iter()
+                .any(|queued| operation_conflicts(&queued.operation))
+        {
+            drop(app_state);
+            self.broadcast_notification(
+                peer_map,
+                "The source or virtual tool already has an active or queued operation",
+            )
+            .await;
+            return;
+        }
+        let queued_command = QueuedCommand {
+            command: Command::LinkInstalledToolToVirtualTool {
+                installed_tool_id: installed_tool_id.clone(),
+                virtual_tool_id: virtual_tool_id.clone(),
+            },
+            operation: OperationInfo {
+                id: operation_id(),
+                label: format!(
+                    "Link {} to {}",
+                    installed_tool.display_name, virtual_tool.user_label
+                ),
+                kind: OperationKind::Link,
+                state: OperationState::Pending,
+                progress: 0,
+                download: None,
+                release_id: installed_tool.catalog_release_id.clone(),
+                installed_tool_id: Some(installed_tool_id),
+                virtual_tool_id: Some(virtual_tool_id),
+            },
+        };
+
+        app_state.operation_queue.push_back(queued_command);
+        app_state.queued_operations = app_state
+            .operation_queue
+            .iter()
+            .map(|queued| queued.operation.clone())
+            .collect();
+        drop(app_state);
         self.queue_notify.notify_one();
         self.broadcast_operation_state(peer_map).await;
     }
@@ -435,7 +616,7 @@ impl WineCask {
             return;
         };
 
-        let app_state = self.app_state.lock().await;
+        let mut app_state = self.app_state.lock().await;
         if app_state
             .current_operation
             .as_ref()
@@ -454,8 +635,6 @@ impl WineCask {
             .await;
             return;
         }
-        drop(app_state);
-
         let queued_command = QueuedCommand {
             command: Command::RenameVirtualTool {
                 virtual_tool_id: virtual_tool_id.clone(),
@@ -474,12 +653,13 @@ impl WineCask {
             },
         };
 
-        self.app_state
-            .lock()
-            .await
+        app_state.operation_queue.push_back(queued_command);
+        app_state.queued_operations = app_state
             .operation_queue
-            .push_back(queued_command);
-        self.sync_public_queue_snapshot().await;
+            .iter()
+            .map(|queued| queued.operation.clone())
+            .collect();
+        drop(app_state);
         self.queue_notify.notify_one();
         self.broadcast_operation_state(peer_map).await;
     }
@@ -491,7 +671,7 @@ impl WineCask {
             return;
         };
 
-        let app_state = self.app_state.lock().await;
+        let mut app_state = self.app_state.lock().await;
         if app_state
             .current_operation
             .as_ref()
@@ -510,8 +690,6 @@ impl WineCask {
             .await;
             return;
         }
-        drop(app_state);
-
         let queued_command = QueuedCommand {
             command: Command::RemoveVirtualTool {
                 virtual_tool_id: virtual_tool_id.clone(),
@@ -529,12 +707,13 @@ impl WineCask {
             },
         };
 
-        self.app_state
-            .lock()
-            .await
+        app_state.operation_queue.push_back(queued_command);
+        app_state.queued_operations = app_state
             .operation_queue
-            .push_back(queued_command);
-        self.sync_public_queue_snapshot().await;
+            .iter()
+            .map(|queued| queued.operation.clone())
+            .collect();
+        drop(app_state);
         self.queue_notify.notify_one();
         self.broadcast_operation_state(peer_map).await;
     }
@@ -703,6 +882,8 @@ impl WineCask {
 
     pub fn list_compatibility_tools(&self) -> Option<Vec<InstalledCompatibilityTool>> {
         let compat_tools = self.steam_util.list_compatibility_tools().ok()?;
+        let compatibility_tools_directory =
+            self.steam_util.get_steam_compatibility_tools_directory();
 
         let mut installed_tools = Vec::new();
 
@@ -723,6 +904,10 @@ impl WineCask {
                 source: InstalledToolSource::Direct,
                 virtual_tool_id: None,
                 user_label: None,
+                can_link_to_virtual_tool: can_link_source_path(
+                    &compatibility_tools_directory,
+                    &compat_tool.path,
+                ),
             });
         }
 
@@ -827,27 +1012,62 @@ impl WineCask {
                 installed_tool.source = InstalledToolSource::Virtual;
                 installed_tool.virtual_tool_id = Some(virtual_tool_config.id.clone());
                 installed_tool.user_label = Some(virtual_tool_config.user_label.clone());
+                installed_tool.can_link_to_virtual_tool = false;
             }
+        }
 
-            if let Some(virtual_tool_id) = &installed_tool.virtual_tool_id {
-                if let Some(virtual_tool_config) = virtual_manifest
-                    .tools
-                    .iter()
-                    .find(|config| &config.id == virtual_tool_id)
-                {
-                    if let Some(release_id) = &virtual_tool_config.current_payload_release_id {
-                        if let Some(catalog_release) = catalog_lookup.get(release_id) {
-                            apply_catalog_release(installed_tool, catalog_release);
-                        }
-                    }
-                }
-                continue;
-            }
-
+        for installed_tool in installed_tools
+            .iter_mut()
+            .filter(|tool| matches!(&tool.source, InstalledToolSource::Direct))
+        {
             if let Some(catalog_release) =
                 find_catalog_release_for_tool(&catalog_flavors, installed_tool)
             {
                 apply_catalog_release(installed_tool, &catalog_release);
+            }
+        }
+
+        let direct_tools: Vec<InstalledCompatibilityTool> = installed_tools
+            .iter()
+            .filter(|tool| matches!(&tool.source, InstalledToolSource::Direct))
+            .cloned()
+            .collect();
+
+        for installed_tool in installed_tools
+            .iter_mut()
+            .filter(|tool| matches!(&tool.source, InstalledToolSource::Virtual))
+        {
+            let Some(virtual_tool_config) =
+                installed_tool
+                    .virtual_tool_id
+                    .as_ref()
+                    .and_then(|virtual_tool_id| {
+                        virtual_manifest
+                            .tools
+                            .iter()
+                            .find(|config| &config.id == virtual_tool_id)
+                    })
+            else {
+                continue;
+            };
+
+            if let Some(linked_source) = find_live_linked_source(virtual_tool_config, &direct_tools)
+            {
+                installed_tool.flavor = linked_source.flavor.clone();
+                installed_tool.catalog_release_id = linked_source.catalog_release_id.clone();
+                installed_tool.github_release = linked_source.github_release.clone();
+            } else {
+                if let Some(release_id) = &virtual_tool_config.current_payload_release_id {
+                    if let Some(catalog_release) = catalog_lookup.get(release_id) {
+                        apply_catalog_release(installed_tool, catalog_release);
+                    } else {
+                        installed_tool.catalog_release_id = Some(release_id.clone());
+                    }
+                }
+                installed_tool.flavor = virtual_tool_config
+                    .current_payload_flavor
+                    .clone()
+                    .unwrap_or_else(|| installed_tool.flavor.clone());
             }
         }
 
@@ -858,18 +1078,38 @@ impl WineCask {
                 let installed_tool = installed_tools.iter().find(|tool| {
                     tool.virtual_tool_id.as_deref() == Some(virtual_tool_config.id.as_str())
                 });
-                let current_payload_release = virtual_tool_config
-                    .current_payload_release_id
+                let linked_source = find_live_linked_source(virtual_tool_config, &direct_tools);
+                let current_payload_release_id = if let Some(linked_source) = linked_source {
+                    linked_source.catalog_release_id.clone()
+                } else {
+                    virtual_tool_config.current_payload_release_id.clone()
+                };
+                let current_payload_release = current_payload_release_id
                     .as_ref()
                     .and_then(|release_id| catalog_lookup.get(release_id));
-                let github_release =
-                    current_payload_release.map(|catalog_release| catalog_release.release.clone());
-                let current_payload_name = github_release
-                    .as_ref()
-                    .map(|release| release.tag_name.clone());
-                let current_payload_flavor = current_payload_release
-                    .map(|catalog_release| catalog_release.flavor.clone())
+                let github_release = linked_source
+                    .and_then(|source| source.github_release.clone())
+                    .or_else(|| {
+                        current_payload_release
+                            .map(|catalog_release| catalog_release.release.clone())
+                    });
+                let current_payload_name = linked_source
+                    .map(|source| source.display_name.clone())
+                    .or_else(|| {
+                        github_release
+                            .as_ref()
+                            .map(|release| release.tag_name.clone())
+                    })
+                    .or_else(|| virtual_tool_config.current_payload_name.clone());
+                let current_payload_flavor = linked_source
+                    .map(|source| source.flavor.clone())
+                    .or_else(|| current_payload_release.map(|release| release.flavor.clone()))
+                    .or_else(|| virtual_tool_config.current_payload_flavor.clone())
                     .unwrap_or(CompatibilityToolFlavor::Unknown);
+                let has_linked_source = virtual_tool_config
+                    .linked_source_installed_tool_id
+                    .is_some()
+                    || virtual_tool_config.linked_source_directory_name.is_some();
 
                 VirtualCompatibilityTool {
                     id: virtual_tool_config.id.clone(),
@@ -877,12 +1117,14 @@ impl WineCask {
                     steam_internal_name: virtual_tool_config.steam_internal_name.clone(),
                     directory_name: virtual_tool_config.directory_name.clone(),
                     installed_tool_id: installed_tool.map(|tool| tool.id.clone()),
-                    current_payload_release_id: virtual_tool_config
-                        .current_payload_release_id
-                        .clone(),
+                    current_payload_release_id,
                     current_payload_name,
                     current_payload_flavor,
                     github_release,
+                    linked_source_installed_tool_id: virtual_tool_config
+                        .linked_source_installed_tool_id
+                        .clone(),
+                    linked_source_missing: has_linked_source && linked_source.is_none(),
                     requires_restart: installed_tool
                         .map(|tool| tool.requires_restart)
                         .unwrap_or(true),
@@ -961,6 +1203,28 @@ fn build_catalog_lookup(catalog_flavors: &[Flavor]) -> HashMap<String, CatalogRe
         .collect()
 }
 
+fn find_live_linked_source<'a>(
+    virtual_tool: &VirtualToolConfig,
+    direct_tools: &'a [InstalledCompatibilityTool],
+) -> Option<&'a InstalledCompatibilityTool> {
+    let has_linked_source = virtual_tool.linked_source_installed_tool_id.is_some()
+        || virtual_tool.linked_source_directory_name.is_some();
+    has_linked_source.then_some(())?;
+
+    direct_tools.iter().find(|tool| {
+        virtual_tool
+            .linked_source_installed_tool_id
+            .as_ref()
+            .map(|source_id| source_id == &tool.id)
+            .unwrap_or(true)
+            && virtual_tool
+                .linked_source_directory_name
+                .as_ref()
+                .map(|directory_name| directory_name == &tool.directory_name)
+                .unwrap_or(true)
+    })
+}
+
 fn find_catalog_release_for_tool(
     catalog_flavors: &[Flavor],
     installed_tool: &InstalledCompatibilityTool,
@@ -978,11 +1242,18 @@ fn find_catalog_release_for_tool(
                     return Some(catalog_release.clone());
                 }
             } else if flavor.flavor == CompatibilityToolFlavor::ProtonCachyOS {
-                if installed_tool
-                    .display_name
-                    .to_lowercase()
-                    .contains("cachyos")
-                {
+                if [
+                    &installed_tool.internal_name,
+                    &installed_tool.display_name,
+                    &installed_tool.directory_name,
+                ]
+                .iter()
+                .any(|name| {
+                    proton_cachyos_tool_name_matches_release(
+                        name,
+                        &catalog_release.release.tag_name,
+                    )
+                }) {
                     return Some(catalog_release.clone());
                 }
             } else if installed_tool.display_name
@@ -1002,6 +1273,27 @@ fn proton_ge_tool_name_matches_release(tool_name: &str, release_tag: &str) -> bo
     tool_name == release_tag
         || tool_name.strip_suffix("-x86_64") == Some(release_tag)
         || tool_name.strip_suffix("-aarch64") == Some(release_tag)
+}
+
+fn proton_cachyos_tool_name_matches_release(tool_name: &str, release_tag: &str) -> bool {
+    let normalized_tag = normalize_release_identity(release_tag);
+    let mut normalized_tool = normalize_release_identity(tool_name);
+    for architecture_suffix in ["x8664v3", "x8664v2", "x8664", "aarch64"] {
+        if let Some(without_suffix) = normalized_tool.strip_suffix(architecture_suffix) {
+            normalized_tool = without_suffix.to_string();
+            break;
+        }
+    }
+
+    normalized_tool == normalized_tag || normalized_tool == format!("proton{}", normalized_tag)
+}
+
+fn normalize_release_identity(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(char::to_lowercase)
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect()
 }
 
 fn apply_catalog_release(
@@ -1031,7 +1323,9 @@ fn install_operation_matches_target(
 fn duplicate_install_notification_message(target: &InstallTarget) -> &'static str {
     match target {
         InstallTarget::Direct => "That release is already queued or installing",
-        InstallTarget::VirtualTool { .. } => "That release is already queued for that virtual tool",
+        InstallTarget::VirtualTool { .. } => {
+            "That virtual tool already has an active or queued operation"
+        }
     }
 }
 
@@ -1410,5 +1704,69 @@ mod tests {
             "GE-Proton11-60-x86_64",
             "GE-Proton11-6"
         ));
+    }
+
+    #[test]
+    fn matches_exact_cachyos_release_identity_with_architecture_suffix() {
+        assert!(proton_cachyos_tool_name_matches_release(
+            "proton-cachyos-11.0-20260703-slr-x86_64_v3",
+            "cachyos-11.0-20260703-slr"
+        ));
+        assert!(proton_cachyos_tool_name_matches_release(
+            "CachyOS 11.0-20260703 SLR",
+            "cachyos-11.0-20260703-slr"
+        ));
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_different_cachyos_release_identity() {
+        assert!(!proton_cachyos_tool_name_matches_release(
+            "Proton CachyOS",
+            "cachyos-11.0-20260703-slr"
+        ));
+        assert!(!proton_cachyos_tool_name_matches_release(
+            "proton-cachyos-11.0-20260702-slr-x86_64_v3",
+            "cachyos-11.0-20260703-slr"
+        ));
+    }
+
+    #[test]
+    fn linked_source_resolution_requires_persisted_identity_fields() {
+        let direct_tool = InstalledCompatibilityTool {
+            id: "installed:GE-Proton".to_string(),
+            path: "/compatibilitytools.d/GE-Proton".to_string(),
+            directory_name: "GE-Proton".to_string(),
+            display_name: "GE-Proton 11".to_string(),
+            internal_name: "GE-Proton11".to_string(),
+            used_by_games: Vec::new(),
+            requires_restart: false,
+            flavor: CompatibilityToolFlavor::ProtonGE,
+            catalog_release_id: Some("catalog:ProtonGE:11".to_string()),
+            github_release: None,
+            source: InstalledToolSource::Direct,
+            virtual_tool_id: None,
+            user_label: None,
+            can_link_to_virtual_tool: true,
+        };
+        let virtual_tool = VirtualToolConfig {
+            id: "virtual-1".to_string(),
+            user_label: "Stable".to_string(),
+            steam_internal_name: "WineCellarVirtual1".to_string(),
+            directory_name: "WineCellarVirtual1".to_string(),
+            current_payload_release_id: None,
+            current_payload_name: None,
+            current_payload_flavor: None,
+            linked_source_installed_tool_id: Some("installed:GE-Proton".to_string()),
+            linked_source_directory_name: Some("GE-Proton".to_string()),
+            pending_payload_transaction: None,
+        };
+
+        let tools = vec![direct_tool];
+        let resolved = find_live_linked_source(&virtual_tool, &tools).unwrap();
+        assert_eq!(resolved.display_name, "GE-Proton 11");
+
+        let mut stale_identity = virtual_tool;
+        stale_identity.linked_source_directory_name = Some("Other-Proton".to_string());
+        assert!(find_live_linked_source(&stale_identity, &tools).is_none());
     }
 }

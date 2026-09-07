@@ -69,6 +69,18 @@ export function mountCatalogReleaseToVirtualTool(
   });
 }
 
+export function linkInstalledToolToVirtualTool(
+  socket: WebSocket,
+  installedToolId: string,
+  virtualToolId: string,
+): void {
+  sendCommand(socket, {
+    type: CommandType.LinkInstalledToolToVirtualTool,
+    installed_tool_id: installedToolId,
+    virtual_tool_id: virtualToolId,
+  });
+}
+
 export function uninstallInstalledTool(
   socket: WebSocket,
   installedToolId: string,
