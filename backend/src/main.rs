@@ -6,8 +6,9 @@ mod wine_cask;
 use crate::multilogger::MultiLogger;
 use crate::steam_util::SteamUtil;
 use crate::wine_cask::app::{
-    AppState, Command, MessageEnvelope, MessageType, UpdaterState, WineCask,
+    AppState, Command, InstallTarget, MessageEnvelope, MessageType, UpdaterState, WineCask,
 };
+use crate::wine_cask::flavors::InstalledToolSource;
 use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, stream::TryStreamExt, StreamExt};
 use log::{error, info, warn, Level};
@@ -227,12 +228,14 @@ fn get_virtual_tool_manifest_path() -> PathBuf {
 }
 
 async fn initialize_app_state(wine_cask: &WineCask) {
+    /* TODO: WIP - virtual tool recovery.
     if let Err(err) = wine_cask.reconcile_virtual_tool_payload_transactions() {
         error!(
             "Failed to reconcile interrupted virtual tool operation: {}",
             err
         );
     }
+    */
     wine_cask.sync_backend_state().await;
 }
 
@@ -273,6 +276,19 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
                     Command::RefreshCatalog => {
                         wine_cask.check_for_flavor_updates(peer_map, true).await;
                     }
+                    Command::InstallCatalogRelease {
+                        release_id,
+                        target: InstallTarget::Direct,
+                    } => {
+                        wine_cask
+                            .queue_install_catalog_release(
+                                release_id,
+                                InstallTarget::Direct,
+                                peer_map,
+                            )
+                            .await;
+                    }
+                    /* TODO: WIP - virtual install targets and linking.
                     Command::InstallCatalogRelease { release_id, target } => {
                         wine_cask
                             .queue_install_catalog_release(release_id, target, peer_map)
@@ -290,7 +306,19 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
                             )
                             .await;
                     }
+                    */
                     Command::UninstallInstalledTool { installed_tool_id } => {
+                        // TODO: WIP - keep virtual slots out of the shared uninstall route.
+                        if wine_cask
+                            .get_installed_tool(&installed_tool_id)
+                            .await
+                            .is_some_and(|tool| matches!(tool.source, InstalledToolSource::Virtual))
+                        {
+                            wine_cask
+                                .broadcast_notification(peer_map, "Error: Virtual tools are disabled")
+                                .await;
+                            return;
+                        }
                         wine_cask
                             .queue_uninstall_installed_tool(installed_tool_id, peer_map)
                             .await;
@@ -298,6 +326,7 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
                     Command::CancelOperation { operation_id } => {
                         wine_cask.cancel_operation(operation_id, peer_map).await;
                     }
+                    /* TODO: WIP - virtual tool management commands.
                     Command::CreateVirtualTool { user_label } => {
                         wine_cask
                             .queue_create_virtual_tool(user_label, peer_map)
@@ -314,6 +343,12 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
                     Command::RemoveVirtualTool { virtual_tool_id } => {
                         wine_cask
                             .queue_remove_virtual_tool(virtual_tool_id, peer_map)
+                            .await;
+                    }
+                    */
+                    _ => {
+                        wine_cask
+                            .broadcast_notification(peer_map, "Error: Virtual tools are disabled")
                             .await;
                     }
                 }

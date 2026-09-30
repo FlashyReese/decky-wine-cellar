@@ -170,6 +170,8 @@ export default function ApplicationsTab({
   const unavailableVirtualToolReasons = useMemo(() => {
     const reasons = new Map<string, string>();
     appState.virtual_tools.forEach((tool) => {
+      reasons.set(tool.steam_internal_name, "virtual tools are disabled");
+      /* TODO: WIP - allow virtual tool selection once available.
       if (tool.linked_source_missing) {
         reasons.set(tool.steam_internal_name, "its linked source is missing");
       } else if (
@@ -179,6 +181,7 @@ export default function ApplicationsTab({
       ) {
         reasons.set(tool.steam_internal_name, "it has no payload");
       }
+      */
     });
     return reasons;
   }, [appState.virtual_tools]);

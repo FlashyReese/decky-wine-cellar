@@ -22,12 +22,13 @@ import {
   OperationInfo,
   OperationKind,
   OperationState,
-  VirtualCompatibilityTool,
+  // TODO: WIP - virtual tool controls.
+  // VirtualCompatibilityTool,
 } from "../types";
 import {
   cancelOperation,
   installCatalogRelease,
-  mountCatalogReleaseToVirtualTool,
+  // mountCatalogReleaseToVirtualTool,
   uninstallInstalledTool,
 } from "../utils/backendApi";
 import { RestartSteamClient } from "../utils/steamUtils";
@@ -42,7 +43,10 @@ export default function FlavorTab({
   socket: WebSocket;
 }) {
   const installedToolsForFlavor = appState.installed_tools.filter(
-    (tool) => tool.flavor === flavor.flavor,
+    (tool) =>
+      tool.flavor === flavor.flavor &&
+      // TODO: WIP - expose virtual slots when their controls are available.
+      tool.source !== InstalledToolSource.Virtual,
   );
   const operations = [
     ...(appState.current_operation != null ? [appState.current_operation] : []),
@@ -63,6 +67,7 @@ export default function FlavorTab({
     showModal(<ChangeLogModal release={release.release} />);
   };
 
+  /* TODO: WIP - mount catalog release control.
   const handleMountCatalogRelease = (
     release: CatalogRelease,
     virtualTool: VirtualCompatibilityTool,
@@ -109,6 +114,7 @@ export default function FlavorTab({
       />,
     );
   };
+  */
 
   const handleUninstallToolModal = (tool: InstalledCompatibilityTool) =>
     showModal(
@@ -318,6 +324,7 @@ export default function FlavorTab({
                             >
                               Install as New Tool
                             </MenuItem>
+                            {/* TODO: WIP - virtual tool mount actions.
                             {appState.virtual_tools.map((virtualTool) => (
                               <MenuItem
                                 key={virtualTool.id}
@@ -332,6 +339,8 @@ export default function FlavorTab({
                                 Mount to {virtualTool.user_label}
                               </MenuItem>
                             ))}
+                            */}
+
                             {releaseOperations.map((operation) => (
                               <MenuItem
                                 key={operation.id}
@@ -380,6 +389,7 @@ function getToolLabel(tool: InstalledCompatibilityTool): string {
   return tool.user_label ?? tool.display_name;
 }
 
+/* TODO: WIP - virtual tool display helpers.
 function virtualToolHasPayload(tool: VirtualCompatibilityTool): boolean {
   return (
     tool.current_payload_name != null ||
@@ -394,6 +404,7 @@ function getVirtualPayloadLabel(tool: VirtualCompatibilityTool): string {
     (tool.current_payload_release_id != null ? "the current payload" : "payload")
   );
 }
+*/
 
 function isDirectInstallOperation(operation: OperationInfo): boolean {
   return (

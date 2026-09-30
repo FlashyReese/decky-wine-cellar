@@ -54,6 +54,7 @@ export function installCatalogRelease(socket: WebSocket, releaseId: string): voi
   });
 }
 
+/* TODO: WIP - virtual tool install and link requests.
 export function mountCatalogReleaseToVirtualTool(
   socket: WebSocket,
   releaseId: string,
@@ -80,6 +81,7 @@ export function linkInstalledToolToVirtualTool(
     virtual_tool_id: virtualToolId,
   });
 }
+*/
 
 export function uninstallInstalledTool(
   socket: WebSocket,
@@ -98,6 +100,7 @@ export function cancelOperation(socket: WebSocket, operationId: string): void {
   });
 }
 
+/* TODO: WIP - virtual tool management requests.
 export function createVirtualTool(socket: WebSocket, userLabel: string): void {
   sendCommand(socket, {
     type: CommandType.CreateVirtualTool,
@@ -126,3 +129,4 @@ export function removeVirtualTool(
     virtual_tool_id: virtualToolId,
   });
 }
+*/

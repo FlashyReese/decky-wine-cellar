@@ -13,7 +13,8 @@ import {
 import { FaEllipsisH } from "react-icons/fa";
 import ChangeLogModal from "../components/changeLogModal";
 import OperationProgress from "../components/operationProgress";
-import { showTextPromptModal } from "../components/textPromptModal";
+// TODO: WIP - virtual tool controls.
+// import { showTextPromptModal } from "../components/textPromptModal";
 import {
   AppState,
   GitHubRelease,
@@ -21,14 +22,14 @@ import {
   InstalledToolSource,
   OperationKind,
   OperationState,
-  VirtualCompatibilityTool,
+  // VirtualCompatibilityTool,
 } from "../types";
 import {
   cancelOperation,
-  createVirtualTool,
-  linkInstalledToolToVirtualTool,
-  removeVirtualTool,
-  renameVirtualTool,
+  // createVirtualTool,
+  // linkInstalledToolToVirtualTool,
+  // removeVirtualTool,
+  // renameVirtualTool,
   uninstallInstalledTool,
 } from "../utils/backendApi";
 import { RestartSteamClient } from "../utils/steamUtils";
@@ -43,9 +44,12 @@ export default function ManagerTab({
   const directInstalledTools = appState.installed_tools.filter(
     (tool) => tool.source !== InstalledToolSource.Virtual,
   );
+  /* TODO: WIP - virtual tool source picker.
   const linkableInstalledTools = directInstalledTools.filter(
     (tool) => tool.can_link_to_virtual_tool !== false,
   );
+  */
+
   const operations = [
     ...(appState.current_operation != null ? [appState.current_operation] : []),
     ...appState.queued_operations,
@@ -56,6 +60,7 @@ export default function ManagerTab({
       ? appState.current_operation
       : undefined;
 
+  /* TODO: WIP - create virtual tool control.
   const showCreateVirtualToolModal = () =>
     showTextPromptModal({
       title: "Create Virtual Tool",
@@ -66,6 +71,7 @@ export default function ManagerTab({
         createVirtualTool(socket, value);
       },
     });
+  */
 
   const handleViewUsedByGames = (title: string, usedByGames: string[]) => {
     showModal(
@@ -98,6 +104,7 @@ export default function ManagerTab({
       />,
     );
 
+  /* TODO: WIP - virtual tool controls.
   const handleRemoveVirtualTool = (virtualTool: VirtualCompatibilityTool) => {
     if (virtualTool.installed_tool_id != null) {
       uninstallInstalledTool(socket, virtualTool.installed_tool_id);
@@ -224,6 +231,7 @@ export default function ManagerTab({
       { bFitToWindow: true, bShiftToFitWindow: true },
     );
   };
+  */
 
   return (
     <DialogBody>
@@ -249,6 +257,7 @@ export default function ManagerTab({
           <OperationProgress operation={currentTransfer} />
         </DialogControlsSection>
       )}
+      {/* TODO: WIP - virtual tools panel.
       <DialogControlsSection>
         <DialogControlsSectionHeader>Virtual Tools</DialogControlsSectionHeader>
         <p style={{ marginTop: 0 }}>
@@ -452,11 +461,12 @@ export default function ManagerTab({
           </ul>
         )}
       </DialogControlsSection>
+      */}
 
       <DialogControlsSection>
         <DialogControlsSectionHeader>Installed</DialogControlsSectionHeader>
         {directInstalledTools.length === 0 ? (
-          <div>No installed compatibility tools are available to link.</div>
+          <div>No installed compatibility tools are available.</div>
         ) : (
           <ul style={{ listStyleType: "none", margin: 0, padding: 0 }}>
             {directInstalledTools.map((installedTool) => {
@@ -508,6 +518,7 @@ export default function ManagerTab({
                       onClick={(event: MouseEvent) =>
                         showContextMenu(
                           <Menu label="Installed Tool Actions">
+                            {/* TODO: WIP - virtual tool link actions.
                             {installedTool.can_link_to_virtual_tool === false && (
                               <MenuItem disabled>
                                 Link unavailable (source folder is a symlink)
@@ -548,6 +559,8 @@ export default function ManagerTab({
                                 </MenuItem>
                               );
                               })}
+                            */}
+
                             <MenuItem
                               disabled={
                                 installedToolBusy || linkedSlots.length !== 0
@@ -613,6 +626,7 @@ function getInstalledToolLabel(tool: InstalledCompatibilityTool): string {
   return tool.user_label ?? tool.display_name;
 }
 
+/* TODO: WIP - virtual tool display helpers.
 function virtualToolHasPayload(tool: VirtualCompatibilityTool): boolean {
   return (
     tool.current_payload_name != null ||
@@ -627,3 +641,4 @@ function getVirtualPayloadLabel(tool: VirtualCompatibilityTool): string {
     (tool.current_payload_release_id != null ? "Installed payload" : "Empty");
   return payloadLabel;
 }
+*/
