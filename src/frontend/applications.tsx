@@ -2,15 +2,23 @@ import {
   DialogBody,
   DialogButton,
   DialogControlsSection,
-  DialogControlsSectionHeader,
-  DialogLabel,
   Dropdown,
   Field,
   Focusable,
+  GamepadButton,
+  GamepadEvent,
   SingleDropdownOption,
   TextField,
 } from "@decky/ui";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { FaChevronLeft, FaChevronRight } from "react-icons/fa";
 import { AppState } from "../types";
 import { requestState } from "../utils/backendApi";
 import {
@@ -99,9 +107,9 @@ function ApplicationIcon({
     <div
       aria-hidden="true"
       style={{
-        width: "40px",
-        minWidth: "40px",
-        height: "40px",
+        width: "32px",
+        minWidth: "32px",
+        height: "32px",
         boxSizing: "border-box",
         overflow: "hidden",
         display: "grid",
@@ -122,8 +130,8 @@ function ApplicationIcon({
           onError={() => setImageFailed(true)}
           style={{
             display: "block",
-            width: "40px",
-            height: "40px",
+            width: "32px",
+            height: "32px",
             objectFit: "cover",
           }}
         />
@@ -142,6 +150,9 @@ export default function ApplicationsTab({
     [],
   );
   const [search, setSearch] = useState("");
+  const searchFieldRef = useRef<HTMLDivElement>(null);
+  const applicationListRef = useRef<HTMLUListElement>(null);
+  const restoreListFocus = useRef(false);
   const [page, setPage] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string>();
@@ -324,6 +335,58 @@ export default function ApplicationsTab({
     1,
     Math.ceil(filteredApplications.length / APPLICATIONS_PER_PAGE),
   );
+  const canGoToPreviousPage = page > 0;
+  const canGoToNextPage = page + 1 < pageCount;
+
+  const changePage = (offset: number) => {
+    const list = applicationListRef.current;
+    restoreListFocus.current =
+      list?.contains(list.ownerDocument.activeElement) ?? false;
+    setPage((current) => Math.max(0, Math.min(pageCount - 1, current + offset)));
+  };
+  const previousPage = () => changePage(-1);
+  const nextPage = () => changePage(1);
+
+  useLayoutEffect(() => {
+    if (restoreListFocus.current) {
+      restoreListFocus.current = false;
+      applicationListRef.current
+        ?.querySelector<HTMLButtonElement>('button[role="combobox"]')
+        ?.focus();
+    }
+  }, [page]);
+
+  const focusSearch = (event: GamepadEvent) => {
+    event.stopPropagation();
+    if (event.detail.is_repeat) {
+      return;
+    }
+
+    const input = searchFieldRef.current?.querySelector("input");
+    input?.focus();
+    input?.click();
+  };
+
+  const handlePageButton = (event: GamepadEvent) => {
+    const button = event.detail.button;
+    if (
+      button !== GamepadButton.BUMPER_LEFT &&
+      button !== GamepadButton.BUMPER_RIGHT
+    ) {
+      return;
+    }
+
+    event.stopPropagation();
+    if (event.detail.is_repeat) {
+      return;
+    }
+
+    if (button === GamepadButton.BUMPER_LEFT && canGoToPreviousPage) {
+      previousPage();
+    } else if (button === GamepadButton.BUMPER_RIGHT && canGoToNextPage) {
+      nextPage();
+    }
+  };
 
   useEffect(() => {
     setPage((current) => Math.min(current, pageCount - 1));
@@ -498,35 +561,30 @@ export default function ApplicationsTab({
     filteredApplications.length,
   );
 
-  return (
+  const content = (
     <DialogBody>
       <DialogControlsSection>
-        <DialogControlsSectionHeader>
-          Application Compatibility
-        </DialogControlsSectionHeader>
-        <p style={{ marginTop: 0 }}>
-          Choose the compatibility tool for installed Steam games and non-Steam
-          shortcuts. Select Steam default to remove a manual override.
-        </p>
         {compatibilityMappingsStale && (
           <div role="alert" style={{ color: "#f5c56b", paddingBottom: "10px" }}>
             Saved compatibility assignments could not be refreshed. Changes are
             disabled until Refresh succeeds.
           </div>
         )}
-        <DialogLabel>Search applications</DialogLabel>
         <Focusable
           flow-children="row"
           style={{
             display: "flex",
             alignItems: "center",
-            flexWrap: "wrap",
             gap: "10px",
           }}
         >
-          <div style={{ flex: "1 1 280px", minWidth: 0 }}>
+          <div
+            ref={searchFieldRef}
+            style={{ flex: 1, minWidth: 0 }}
+          >
             <TextField
               aria-label="Search installed Steam games and non-Steam shortcuts"
+              {...{ placeholder: "Search games, shortcuts, or tools" }}
               value={search}
               bShowClearAction
               onChange={(event) => setSearch(event.currentTarget.value)}
@@ -538,20 +596,13 @@ export default function ApplicationsTab({
             onClick={refresh}
             style={{
               width: "auto",
-              minWidth: "110px",
+              minWidth: "90px",
               flex: "0 0 auto",
             }}
           >
             {isLoading ? "Refreshing…" : "Refresh"}
           </DialogButton>
         </Focusable>
-      </DialogControlsSection>
-
-      <DialogControlsSection>
-        <DialogControlsSectionHeader>
-          Installed Applications
-        </DialogControlsSectionHeader>
-
         {isLoading && applications.length === 0 && (
           <div role="status" aria-live="polite">
             Loading installed applications…
@@ -585,14 +636,64 @@ export default function ApplicationsTab({
 
         {pageApplications.length > 0 && (
           <>
-            <div
-              role="status"
-              aria-live="polite"
-              style={{ opacity: 0.75, paddingBottom: "8px" }}
+            <Focusable
+              flow-children="row"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "10px",
+                padding: "8px 0",
+                boxShadow: "none",
+              }}
             >
-              Showing {shownStart}–{shownEnd} of {filteredApplications.length}
-            </div>
+              <span
+                role="status"
+                aria-live="polite"
+                style={{ opacity: 0.75, fontSize: "14px" }}
+              >
+                {shownStart}–{shownEnd} of {filteredApplications.length}
+              </span>
+              {pageCount > 1 && (
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                >
+                  <DialogButton
+                    aria-label="Previous application page"
+                    onOKActionDescription="Previous page"
+                    disabled={!canGoToPreviousPage}
+                    onClick={previousPage}
+                    style={{
+                      width: "40px",
+                      minWidth: "40px",
+                      height: "32px",
+                      padding: "4px 8px",
+                    }}
+                  >
+                    <FaChevronLeft aria-hidden="true" />
+                  </DialogButton>
+                  <span aria-live="polite" style={{ fontSize: "14px" }}>
+                    Page {page + 1} of {pageCount}
+                  </span>
+                  <DialogButton
+                    aria-label="Next application page"
+                    onOKActionDescription="Next page"
+                    disabled={!canGoToNextPage}
+                    onClick={nextPage}
+                    style={{
+                      width: "40px",
+                      minWidth: "40px",
+                      height: "32px",
+                      padding: "4px 8px",
+                    }}
+                  >
+                    <FaChevronRight aria-hidden="true" />
+                  </DialogButton>
+                </div>
+              )}
+            </Focusable>
             <ul
+              ref={applicationListRef}
               aria-label="Installed Steam games and non-Steam shortcuts"
               style={{ listStyle: "none", margin: 0, padding: 0 }}
             >
@@ -615,44 +716,68 @@ export default function ApplicationsTab({
                 return (
                   <li key={key} style={{ margin: 0, padding: 0 }}>
                     <Field
-                      label={application.name || `App ${application.appId}`}
-                      description={
-                        <div>
-                          <div>
+                      label={
+                        <div style={{ minWidth: 0 }}>
+                          <div
+                            title={`${application.name || `App ${application.appId}`} · App ID ${application.appId}`}
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {application.name || `App ${application.appId}`}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              lineHeight: "16px",
+                              opacity: 0.65,
+                            }}
+                          >
                             {application.isShortcut
                               ? "Non-Steam shortcut"
                               : "Steam game"}
-                            {` · App ID ${application.appId}`}
                           </div>
-                          {optionsState?.status === "loading" && (
-                            <div role="status">Loading compatible tools…</div>
-                          )}
-                          {optionsState?.status === "error" && (
-                            <div role="alert" style={{ color: "#ff9f9f" }}>
-                              Could not load compatible tools: {optionsState.message}.
-                              Select the menu again to retry.
-                            </div>
-                          )}
-                          {optimisticAssignments[key] != null && (
-                            <div role="status">Saving compatibility override…</div>
-                          )}
-                          {assignmentError != null && (
-                            <div role="alert" style={{ color: "#ff9f9f" }}>
-                              {assignmentError}
-                            </div>
-                          )}
                         </div>
+                      }
+                      description={
+                        (optionsState?.status === "loading" ||
+                          optionsState?.status === "error" ||
+                          optimisticAssignments[key] != null ||
+                          assignmentError != null) && (
+                          <div>
+                            {optionsState?.status === "loading" && (
+                              <div role="status">Loading compatible tools…</div>
+                            )}
+                            {optionsState?.status === "error" && (
+                              <div role="alert" style={{ color: "#ff9f9f" }}>
+                                Could not load compatible tools: {optionsState.message}.
+                                Select the menu again to retry.
+                              </div>
+                            )}
+                            {optimisticAssignments[key] != null && (
+                              <div role="status">Saving compatibility override…</div>
+                            )}
+                            {assignmentError != null && (
+                              <div role="alert" style={{ color: "#ff9f9f" }}>
+                                {assignmentError}
+                              </div>
+                            )}
+                          </div>
+                        )
                       }
                       icon={<ApplicationIcon application={application} />}
                       bottomSeparator="standard"
-                      inlineWrap="shift-children-below"
+                      inlineWrap="keep-inline"
                       childrenContainerWidth="min"
                       verticalAlignment="center"
+                      padding="compact"
                     >
                       <Focusable
                         flow-children="row"
                         style={{
-                          width: "clamp(190px, 32vw, 340px)",
+                          width: "clamp(160px, 23vw, 260px)",
                           maxWidth: "100%",
                           minWidth: 0,
                           boxShadow: "none",
@@ -671,6 +796,13 @@ export default function ApplicationsTab({
                           renderButtonValue={() => (
                             <span
                               aria-label={`Compatibility tool for ${application.name || `App ${application.appId}`}: ${assignedToolDisplayName}`}
+                              title={assignedToolDisplayName}
+                              style={{
+                                display: "block",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
                             >
                               {assignedToolDisplayName}
                             </span>
@@ -688,44 +820,25 @@ export default function ApplicationsTab({
                 );
               })}
             </ul>
-
-            {pageCount > 1 && (
-              <Focusable
-                flow-children="row"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "10px",
-                  paddingTop: "12px",
-                }}
-              >
-                <DialogButton
-                  aria-label="Previous application page"
-                  disabled={page === 0}
-                  onClick={() => setPage((current) => Math.max(0, current - 1))}
-                  style={{ width: "auto", minWidth: "110px" }}
-                >
-                  Previous
-                </DialogButton>
-                <span aria-live="polite">
-                  Page {page + 1} of {pageCount}
-                </span>
-                <DialogButton
-                  aria-label="Next application page"
-                  disabled={page + 1 >= pageCount}
-                  onClick={() =>
-                    setPage((current) => Math.min(pageCount - 1, current + 1))
-                  }
-                  style={{ width: "auto", minWidth: "110px" }}
-                >
-                  Next
-                </DialogButton>
-              </Focusable>
-            )}
           </>
         )}
       </DialogControlsSection>
     </DialogBody>
+  );
+
+  return (
+    <Focusable
+      flow-children="column"
+      style={{ boxShadow: "none" }}
+      onOptionsButton={focusSearch}
+      onOptionsActionDescription="Search"
+      onButtonDown={handlePageButton}
+      actionDescriptionMap={{
+        [GamepadButton.BUMPER_LEFT]: canGoToPreviousPage ? "Previous page" : undefined,
+        [GamepadButton.BUMPER_RIGHT]: canGoToNextPage ? "Next page" : undefined,
+      }}
+    >
+      {content}
+    </Focusable>
   );
 }
