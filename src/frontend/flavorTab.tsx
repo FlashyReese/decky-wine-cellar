@@ -18,17 +18,12 @@ import {
   CatalogRelease,
   Flavor,
   InstalledCompatibilityTool,
-  InstalledToolSource,
-  OperationInfo,
   OperationKind,
   OperationState,
-  // TODO: WIP - virtual tool controls.
-  // VirtualCompatibilityTool,
 } from "../types";
 import {
   cancelOperation,
   installCatalogRelease,
-  // mountCatalogReleaseToVirtualTool,
   uninstallInstalledTool,
 } from "../utils/backendApi";
 import { RestartSteamClient } from "../utils/steamUtils";
@@ -43,10 +38,7 @@ export default function FlavorTab({
   socket: WebSocket;
 }) {
   const installedToolsForFlavor = appState.installed_tools.filter(
-    (tool) =>
-      tool.flavor === flavor.flavor &&
-      // TODO: WIP - expose virtual slots when their controls are available.
-      tool.source !== InstalledToolSource.Virtual,
+    (tool) => tool.flavor === flavor.flavor,
   );
   const operations = [
     ...(appState.current_operation != null ? [appState.current_operation] : []),
@@ -66,55 +58,6 @@ export default function FlavorTab({
   const handleViewChangeLog = (release: CatalogRelease) => {
     showModal(<ChangeLogModal release={release.release} />);
   };
-
-  /* TODO: WIP - mount catalog release control.
-  const handleMountCatalogRelease = (
-    release: CatalogRelease,
-    virtualTool: VirtualCompatibilityTool,
-  ) => {
-    const mountRelease = () => {
-      mountCatalogReleaseToVirtualTool(socket, release.id, virtualTool.id);
-    };
-    const hasPayload = virtualToolHasPayload(virtualTool);
-    const usedByCount = virtualTool.used_by_games.length;
-
-    if (!hasPayload && usedByCount === 0) {
-      mountRelease();
-      return;
-    }
-
-    const details: string[] = [];
-    if (virtualTool.linked_source_installed_tool_id != null) {
-      details.push(
-        `The downloaded ${release.release.tag_name} payload will replace the current link in ${virtualTool.user_label}. The installed source remains installed and will no longer be required by this slot.`,
-      );
-    } else if (hasPayload) {
-      details.push(
-        `The downloaded ${release.release.tag_name} payload will replace ${getVirtualPayloadLabel(virtualTool)} in ${virtualTool.user_label}.`,
-      );
-    }
-    if (usedByCount !== 0) {
-      details.push(
-        `${usedByCount} ${usedByCount === 1 ? "application is" : "applications are"} assigned to this slot and will use ${release.release.tag_name} on the next launch.`,
-      );
-    }
-
-    showModal(
-      <ConfirmModal
-        strTitle={`${hasPayload ? "Replace" : "Mount"} payload in ${
-          virtualTool.user_label
-        }`}
-        strDescription={details.join(" ")}
-        strOKButtonText={
-          hasPayload ? "Download and Replace" : "Download and Mount"
-        }
-        strCancelButtonText="Cancel"
-        bDestructiveWarning={hasPayload}
-        onOK={mountRelease}
-      />,
-    );
-  };
-  */
 
   const handleUninstallToolModal = (tool: InstalledCompatibilityTool) =>
     showModal(
@@ -136,18 +79,8 @@ export default function FlavorTab({
           <DialogControlsSectionHeader>Installed</DialogControlsSectionHeader>
           <ul style={{ listStyleType: "none", margin: 0, padding: 0 }}>
             {installedToolsForFlavor.map((tool) => {
-              const linkedSlots =
-                tool.source === InstalledToolSource.Direct
-                  ? appState.virtual_tools.filter(
-                      (virtualTool) =>
-                        virtualTool.linked_source_installed_tool_id === tool.id,
-                    )
-                  : [];
               const toolBusy = operations.some(
-                (operation) =>
-                  operation.installed_tool_id === tool.id ||
-                  (tool.virtual_tool_id != null &&
-                    operation.virtual_tool_id === tool.virtual_tool_id),
+                (operation) => operation.installed_tool_id === tool.id,
               );
 
               return (
@@ -164,12 +97,8 @@ export default function FlavorTab({
                 >
                   <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
                     {getToolLabel(tool)}
-                    {tool.source === InstalledToolSource.Virtual &&
-                      " (Virtual Slot)"}
                     {tool.requires_restart && " (Requires Restart)"}
                     {tool.used_by_games.length !== 0 && " (Used By Games)"}
-                    {linkedSlots.length !== 0 &&
-                      ` (Linked to ${linkedSlots.map((slot) => slot.user_label).join(", ")})`}
                   </span>
                   <Focusable
                     style={{
@@ -192,14 +121,12 @@ export default function FlavorTab({
                         showContextMenu(
                           <Menu label="Installed Tool Actions">
                             <MenuItem
-                              disabled={toolBusy || linkedSlots.length !== 0}
+                              disabled={toolBusy}
                               onClick={() => {
                                 handleUninstallToolModal(tool);
                               }}
                             >
-                              {linkedSlots.length === 0
-                                ? "Remove"
-                                : `Remove (linked by ${linkedSlots.map((slot) => slot.user_label).join(", ")})`}
+                              Remove
                             </MenuItem>
                             {tool.used_by_games.length !== 0 && (
                               <MenuItem
@@ -256,18 +183,13 @@ export default function FlavorTab({
         <DialogControlsSectionHeader>Catalog</DialogControlsSectionHeader>
         <ul style={{ listStyleType: "none", margin: 0, padding: 0 }}>
           {flavor.releases.map((release) => {
-            const directInstallPresent = appState.installed_tools.some(
-              (tool) =>
-                tool.source === InstalledToolSource.Direct &&
-                tool.catalog_release_id === release.id,
+            const isInstalled = appState.installed_tools.some(
+              (tool) => tool.catalog_release_id === release.id,
             );
             const releaseOperations = operations.filter(
               (operation) =>
                 operation.kind === OperationKind.Install &&
                 operation.release_id === release.id,
-            );
-            const directInstallOperations = releaseOperations.filter((operation) =>
-              isDirectInstallOperation(operation),
             );
             const activeInstallOperation =
               appState.current_operation != null &&
@@ -275,7 +197,7 @@ export default function FlavorTab({
               appState.current_operation.kind === OperationKind.Install
                 ? appState.current_operation
                 : undefined;
-            const directInstallBusy = directInstallOperations.length !== 0;
+            const installBusy = releaseOperations.length !== 0;
 
             return (
               <li
@@ -291,7 +213,7 @@ export default function FlavorTab({
                 >
                   <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                     {release.release.tag_name}
-                    {directInstallPresent && " (Installed)"}
+                    {isInstalled && " (Installed)"}
                     {releaseOperations.some(
                       (operation) => operation.state === OperationState.Pending,
                     ) && " (Queued)"}
@@ -317,29 +239,13 @@ export default function FlavorTab({
                         showContextMenu(
                           <Menu label="Catalog Release Actions">
                             <MenuItem
-                              disabled={directInstallPresent || directInstallBusy}
+                              disabled={isInstalled || installBusy}
                               onClick={() => {
                                 installCatalogRelease(socket, release.id);
                               }}
                             >
-                              Install as New Tool
+                              Install
                             </MenuItem>
-                            {/* TODO: WIP - virtual tool mount actions.
-                            {appState.virtual_tools.map((virtualTool) => (
-                              <MenuItem
-                                key={virtualTool.id}
-                                disabled={operations.some(
-                                  (operation) =>
-                                    operation.virtual_tool_id === virtualTool.id,
-                                )}
-                                onClick={() => {
-                                  handleMountCatalogRelease(release, virtualTool);
-                                }}
-                              >
-                                Mount to {virtualTool.user_label}
-                              </MenuItem>
-                            ))}
-                            */}
 
                             {releaseOperations.map((operation) => (
                               <MenuItem
@@ -371,10 +277,7 @@ export default function FlavorTab({
                   </Focusable>
                 </div>
                 {activeInstallOperation != null && (
-                  <OperationProgress
-                    operation={activeInstallOperation}
-                    showLabel={activeInstallOperation.virtual_tool_id != null}
-                  />
+                  <OperationProgress operation={activeInstallOperation} />
                 )}
               </li>
             );
@@ -386,28 +289,5 @@ export default function FlavorTab({
 }
 
 function getToolLabel(tool: InstalledCompatibilityTool): string {
-  return tool.user_label ?? tool.display_name;
-}
-
-/* TODO: WIP - virtual tool display helpers.
-function virtualToolHasPayload(tool: VirtualCompatibilityTool): boolean {
-  return (
-    tool.current_payload_name != null ||
-    tool.current_payload_release_id != null ||
-    tool.linked_source_installed_tool_id != null
-  );
-}
-
-function getVirtualPayloadLabel(tool: VirtualCompatibilityTool): string {
-  return (
-    tool.current_payload_name ??
-    (tool.current_payload_release_id != null ? "the current payload" : "payload")
-  );
-}
-*/
-
-function isDirectInstallOperation(operation: OperationInfo): boolean {
-  return (
-    operation.kind === OperationKind.Install && operation.virtual_tool_id == null
-  );
+  return tool.display_name;
 }

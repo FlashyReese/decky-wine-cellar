@@ -26,9 +26,9 @@ export default function About({
       <DialogControlsSection>
         <div>
           <p>
-            Wine Cellar is a compatibility tool manager for Steam. It can
-            install tools directly, maintain reusable virtual compatibility
-            slots, and show which tools the current Steam session has loaded.
+            Wine Cellar is a compatibility tool manager for Steam. It can install
+            and remove tools, manage compatibility settings for your applications,
+            and show which tools the current Steam session has loaded.
           </p>
         </div>
         <DialogControlsSectionHeader>Wine Cellar</DialogControlsSectionHeader>

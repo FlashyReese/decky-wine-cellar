@@ -2,15 +2,12 @@ use crate::steam_util::SteamUtil;
 use crate::wine_cask::download_progress::DownloadProgress;
 use crate::wine_cask::flavors::{
     CatalogRelease, CompatibilityToolFlavor, Flavor, InstalledCompatibilityTool,
-    InstalledToolSource, SteamClientCompatToolInfo, VirtualCompatibilityTool,
+    SteamClientCompatToolInfo,
 };
-use crate::wine_cask::link::can_link_source_path;
-use crate::wine_cask::virtual_tools::{normalize_virtual_tool_label, VirtualToolConfig};
 use crate::PeerMap;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, Notify};
@@ -24,7 +21,6 @@ pub struct WineCask {
     pub app_state: Arc<Mutex<AppState>>,
     pub operation_broadcast_cache: Arc<Mutex<Option<(OperationStateSnapshot, Instant)>>>,
     pub queue_notify: Arc<Notify>,
-    pub virtual_tool_manifest_path: PathBuf,
 }
 
 #[derive(Clone)]
@@ -37,7 +33,6 @@ pub struct QueuedCommand {
 pub struct AppState {
     pub catalog_flavors: Vec<Flavor>,
     pub installed_tools: Vec<InstalledCompatibilityTool>,
-    pub virtual_tools: Vec<VirtualCompatibilityTool>,
     pub app_compat_tool_mappings: HashMap<u64, String>,
     pub app_compat_tool_mappings_stale: bool,
     pub current_operation: Option<OperationInfo>,
@@ -91,11 +86,6 @@ pub enum Command {
     RefreshCatalog,
     InstallCatalogRelease {
         release_id: String,
-        target: InstallTarget,
-    },
-    LinkInstalledToolToVirtualTool {
-        installed_tool_id: String,
-        virtual_tool_id: String,
     },
     UninstallInstalledTool {
         installed_tool_id: String,
@@ -103,33 +93,12 @@ pub enum Command {
     CancelOperation {
         operation_id: String,
     },
-    CreateVirtualTool {
-        user_label: String,
-    },
-    RenameVirtualTool {
-        virtual_tool_id: String,
-        user_label: String,
-    },
-    RemoveVirtualTool {
-        virtual_tool_id: String,
-    },
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
-#[serde(tag = "type")]
-pub enum InstallTarget {
-    Direct,
-    VirtualTool { virtual_tool_id: String },
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum OperationKind {
     Install,
-    Link,
     Uninstall,
-    CreateVirtualTool,
-    RenameVirtualTool,
-    RemoveVirtualTool,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -152,7 +121,6 @@ pub struct OperationInfo {
     pub download: Option<DownloadProgress>,
     pub release_id: Option<String>,
     pub installed_tool_id: Option<String>,
-    pub virtual_tool_id: Option<String>,
 }
 
 impl WineCask {
@@ -224,7 +192,6 @@ impl WineCask {
     pub async fn queue_install_catalog_release(
         &self,
         release_id: String,
-        target: InstallTarget,
         peer_map: &PeerMap,
     ) {
         let Some(catalog_release) = self.get_catalog_release(&release_id).await else {
@@ -233,47 +200,21 @@ impl WineCask {
             return;
         };
 
-        let (label, virtual_tool_id) = match &target {
-            InstallTarget::Direct => (
-                format!("Install {}", catalog_release.release.tag_name),
-                None,
-            ),
-            InstallTarget::VirtualTool { virtual_tool_id } => {
-                let Some(virtual_tool) = self.get_virtual_tool(virtual_tool_id).await else {
-                    self.broadcast_notification(peer_map, "Unknown virtual tool requested")
-                        .await;
-                    return;
-                };
-                (
-                    format!(
-                        "Mount {} to {}",
-                        catalog_release.release.tag_name, virtual_tool.user_label
-                    ),
-                    Some(virtual_tool_id.clone()),
-                )
-            }
-        };
+        let label = format!("Install {}", catalog_release.release.tag_name);
 
         let mut app_state = self.app_state.lock().await;
-        if matches!(&target, InstallTarget::Direct)
-            && app_state.installed_tools.iter().any(|tool| {
-                matches!(tool.source, InstalledToolSource::Direct)
-                    && tool.catalog_release_id.as_deref() == Some(catalog_release.id.as_str())
-            })
-        {
+        if app_state.installed_tools.iter().any(|tool| {
+            tool.catalog_release_id.as_deref() == Some(catalog_release.id.as_str())
+        }) {
             drop(app_state);
             self.broadcast_notification(peer_map, "That release is already installed")
                 .await;
             return;
         }
 
-        let operation_conflicts = |operation: &OperationInfo| match &target {
-            InstallTarget::Direct => {
-                install_operation_matches_target(operation, &release_id, &target)
-            }
-            InstallTarget::VirtualTool { virtual_tool_id } => {
-                operation_targets_virtual_tool(operation, virtual_tool_id)
-            }
+        let operation_conflicts = |operation: &OperationInfo| {
+            operation.kind == OperationKind::Install
+                && operation.release_id.as_deref() == Some(release_id.as_str())
         };
         if app_state
             .current_operation
@@ -286,13 +227,13 @@ impl WineCask {
                 .any(|queued| operation_conflicts(&queued.operation))
         {
             drop(app_state);
-            self.broadcast_notification(peer_map, duplicate_install_notification_message(&target))
+            self.broadcast_notification(peer_map, "That release is already queued or installing")
                 .await;
             return;
         }
 
         let queued_command = QueuedCommand {
-            command: Command::InstallCatalogRelease { release_id, target },
+            command: Command::InstallCatalogRelease { release_id },
             operation: OperationInfo {
                 id: operation_id(),
                 label,
@@ -302,7 +243,6 @@ impl WineCask {
                 download: None,
                 release_id: Some(catalog_release.id),
                 installed_tool_id: None,
-                virtual_tool_id,
             },
         };
 
@@ -328,82 +268,16 @@ impl WineCask {
             return;
         };
 
-        let label = installed_tool
-            .user_label
-            .clone()
-            .unwrap_or_else(|| installed_tool.display_name.clone());
-
-        if matches!(&installed_tool.source, InstalledToolSource::Direct) {
-            let linked_virtual_tools = match self
-                .virtual_tools_linking_source(&installed_tool.id, &installed_tool.directory_name)
-            {
-                Ok(tools) => tools,
-                Err(err) => {
-                    error!("Cannot verify virtual tool dependencies: {}", err);
-                    self.broadcast_notification(
-                        peer_map,
-                        "Cannot safely remove this tool because virtual tool dependencies could not be verified",
-                    )
-                    .await;
-                    return;
-                }
-            };
-            if !linked_virtual_tools.is_empty() {
-                self.broadcast_notification(
-                    peer_map,
-                    &format!(
-                        "Cannot remove {}; it is linked by: {}",
-                        label,
-                        linked_virtual_tools.join(", ")
-                    ),
-                )
-                .await;
-                return;
-            }
-        } else {
-            let virtual_tool_is_tracked =
-                installed_tool
-                    .virtual_tool_id
-                    .as_deref()
-                    .and_then(|virtual_tool_id| {
-                        self.try_load_virtual_tool_manifest().ok().map(|manifest| {
-                            manifest.tools.iter().any(|tool| tool.id == virtual_tool_id)
-                        })
-                    });
-            if virtual_tool_is_tracked != Some(true) {
-                self.broadcast_notification(
-                    peer_map,
-                    "Cannot safely remove this virtual tool because its manifest could not be verified",
-                )
-                .await;
-                return;
-            }
-        }
+        let label = installed_tool.display_name.clone();
 
         let mut app_state = self.app_state.lock().await;
         if app_state
             .current_operation
             .as_ref()
-            .map(|operation| {
-                operation_targets_installed_tool(operation, &installed_tool_id)
-                    || installed_tool
-                        .virtual_tool_id
-                        .as_deref()
-                        .map(|virtual_tool_id| {
-                            operation_targets_virtual_tool(operation, virtual_tool_id)
-                        })
-                        .unwrap_or(false)
-            })
+            .map(|operation| operation_targets_installed_tool(operation, &installed_tool_id))
             .unwrap_or(false)
             || app_state.operation_queue.iter().any(|queued| {
                 operation_targets_installed_tool(&queued.operation, &installed_tool_id)
-                    || installed_tool
-                        .virtual_tool_id
-                        .as_deref()
-                        .map(|virtual_tool_id| {
-                            operation_targets_virtual_tool(&queued.operation, virtual_tool_id)
-                        })
-                        .unwrap_or(false)
             })
         {
             drop(app_state);
@@ -425,285 +299,6 @@ impl WineCask {
                 download: None,
                 release_id: installed_tool.catalog_release_id.clone(),
                 installed_tool_id: Some(installed_tool.id.clone()),
-                virtual_tool_id: installed_tool.virtual_tool_id.clone(),
-            },
-        };
-
-        app_state.operation_queue.push_back(queued_command);
-        app_state.queued_operations = app_state
-            .operation_queue
-            .iter()
-            .map(|queued| queued.operation.clone())
-            .collect();
-        drop(app_state);
-        self.queue_notify.notify_one();
-        self.broadcast_operation_state(peer_map).await;
-    }
-
-    pub async fn queue_link_installed_tool_to_virtual_tool(
-        &self,
-        installed_tool_id: String,
-        virtual_tool_id: String,
-        peer_map: &PeerMap,
-    ) {
-        let Some(installed_tool) = self.get_installed_tool(&installed_tool_id).await else {
-            self.broadcast_notification(peer_map, "Unknown installed tool requested")
-                .await;
-            return;
-        };
-
-        if !matches!(&installed_tool.source, InstalledToolSource::Direct) {
-            self.broadcast_notification(
-                peer_map,
-                "Only a directly installed compatibility tool can be linked",
-            )
-            .await;
-            return;
-        }
-        if !installed_tool.can_link_to_virtual_tool {
-            self.broadcast_notification(
-                peer_map,
-                "This compatibility tool cannot be linked safely",
-            )
-            .await;
-            return;
-        }
-
-        let Some(virtual_tool) = self.get_virtual_tool(&virtual_tool_id).await else {
-            self.broadcast_notification(peer_map, "Unknown virtual tool requested")
-                .await;
-            return;
-        };
-        let virtual_tool_config = match self.try_load_virtual_tool_manifest() {
-            Ok(manifest) => manifest
-                .tools
-                .into_iter()
-                .find(|tool| tool.id == virtual_tool_id),
-            Err(err) => {
-                self.broadcast_notification(
-                    peer_map,
-                    &format!("Cannot safely link compatibility tool: {}", err),
-                )
-                .await;
-                return;
-            }
-        };
-        let Some(virtual_tool_config) = virtual_tool_config else {
-            self.broadcast_notification(peer_map, "Unknown virtual tool requested")
-                .await;
-            return;
-        };
-        if let Err(err) = self
-            .ensure_virtual_tool_registration_compatible(
-                &PathBuf::from(&installed_tool.path).join("compatibilitytool.vdf"),
-                Some(&installed_tool.internal_name),
-                &virtual_tool_config,
-            )
-            .await
-        {
-            self.broadcast_notification(peer_map, &err).await;
-            return;
-        }
-
-        let mut app_state = self.app_state.lock().await;
-        let operation_conflicts = |operation: &OperationInfo| {
-            operation_targets_installed_tool(operation, &installed_tool_id)
-                || operation_targets_virtual_tool(operation, &virtual_tool_id)
-        };
-        if app_state
-            .current_operation
-            .as_ref()
-            .map(operation_conflicts)
-            .unwrap_or(false)
-            || app_state
-                .operation_queue
-                .iter()
-                .any(|queued| operation_conflicts(&queued.operation))
-        {
-            drop(app_state);
-            self.broadcast_notification(
-                peer_map,
-                "The source or virtual tool already has an active or queued operation",
-            )
-            .await;
-            return;
-        }
-        let queued_command = QueuedCommand {
-            command: Command::LinkInstalledToolToVirtualTool {
-                installed_tool_id: installed_tool_id.clone(),
-                virtual_tool_id: virtual_tool_id.clone(),
-            },
-            operation: OperationInfo {
-                id: operation_id(),
-                label: format!(
-                    "Link {} to {}",
-                    installed_tool.display_name, virtual_tool.user_label
-                ),
-                kind: OperationKind::Link,
-                state: OperationState::Pending,
-                progress: 0,
-                download: None,
-                release_id: installed_tool.catalog_release_id.clone(),
-                installed_tool_id: Some(installed_tool_id),
-                virtual_tool_id: Some(virtual_tool_id),
-            },
-        };
-
-        app_state.operation_queue.push_back(queued_command);
-        app_state.queued_operations = app_state
-            .operation_queue
-            .iter()
-            .map(|queued| queued.operation.clone())
-            .collect();
-        drop(app_state);
-        self.queue_notify.notify_one();
-        self.broadcast_operation_state(peer_map).await;
-    }
-
-    pub async fn queue_create_virtual_tool(&self, user_label: String, peer_map: &PeerMap) {
-        let trimmed_label = match normalize_virtual_tool_label(&user_label) {
-            Ok(label) => label,
-            Err(err) => {
-                self.broadcast_notification(peer_map, &err).await;
-                return;
-            }
-        };
-
-        let queued_command = QueuedCommand {
-            command: Command::CreateVirtualTool {
-                user_label: trimmed_label.clone(),
-            },
-            operation: OperationInfo {
-                id: operation_id(),
-                label: format!("Create {}", trimmed_label),
-                kind: OperationKind::CreateVirtualTool,
-                state: OperationState::Pending,
-                progress: 0,
-                download: None,
-                release_id: None,
-                installed_tool_id: None,
-                virtual_tool_id: None,
-            },
-        };
-
-        self.app_state
-            .lock()
-            .await
-            .operation_queue
-            .push_back(queued_command);
-        self.sync_public_queue_snapshot().await;
-        self.queue_notify.notify_one();
-        self.broadcast_operation_state(peer_map).await;
-    }
-
-    pub async fn queue_rename_virtual_tool(
-        &self,
-        virtual_tool_id: String,
-        user_label: String,
-        peer_map: &PeerMap,
-    ) {
-        let trimmed_label = match normalize_virtual_tool_label(&user_label) {
-            Ok(label) => label,
-            Err(err) => {
-                self.broadcast_notification(peer_map, &err).await;
-                return;
-            }
-        };
-
-        let Some(virtual_tool) = self.get_virtual_tool(&virtual_tool_id).await else {
-            self.broadcast_notification(peer_map, "Unknown virtual tool requested")
-                .await;
-            return;
-        };
-
-        let mut app_state = self.app_state.lock().await;
-        if app_state
-            .current_operation
-            .as_ref()
-            .map(|operation| operation_targets_virtual_tool(operation, &virtual_tool_id))
-            .unwrap_or(false)
-            || app_state
-                .operation_queue
-                .iter()
-                .any(|queued| operation_targets_virtual_tool(&queued.operation, &virtual_tool_id))
-        {
-            drop(app_state);
-            self.broadcast_notification(
-                peer_map,
-                "That virtual tool already has an active or queued operation",
-            )
-            .await;
-            return;
-        }
-        let queued_command = QueuedCommand {
-            command: Command::RenameVirtualTool {
-                virtual_tool_id: virtual_tool_id.clone(),
-                user_label: trimmed_label.clone(),
-            },
-            operation: OperationInfo {
-                id: operation_id(),
-                label: format!("Rename {} to {}", virtual_tool.user_label, trimmed_label),
-                kind: OperationKind::RenameVirtualTool,
-                state: OperationState::Pending,
-                progress: 0,
-                download: None,
-                release_id: None,
-                installed_tool_id: virtual_tool.installed_tool_id.clone(),
-                virtual_tool_id: Some(virtual_tool_id),
-            },
-        };
-
-        app_state.operation_queue.push_back(queued_command);
-        app_state.queued_operations = app_state
-            .operation_queue
-            .iter()
-            .map(|queued| queued.operation.clone())
-            .collect();
-        drop(app_state);
-        self.queue_notify.notify_one();
-        self.broadcast_operation_state(peer_map).await;
-    }
-
-    pub async fn queue_remove_virtual_tool(&self, virtual_tool_id: String, peer_map: &PeerMap) {
-        let Some(virtual_tool) = self.get_virtual_tool(&virtual_tool_id).await else {
-            self.broadcast_notification(peer_map, "Unknown virtual tool requested")
-                .await;
-            return;
-        };
-
-        let mut app_state = self.app_state.lock().await;
-        if app_state
-            .current_operation
-            .as_ref()
-            .map(|operation| operation_targets_virtual_tool(operation, &virtual_tool_id))
-            .unwrap_or(false)
-            || app_state
-                .operation_queue
-                .iter()
-                .any(|queued| operation_targets_virtual_tool(&queued.operation, &virtual_tool_id))
-        {
-            drop(app_state);
-            self.broadcast_notification(
-                peer_map,
-                "That virtual tool already has an active or queued operation",
-            )
-            .await;
-            return;
-        }
-        let queued_command = QueuedCommand {
-            command: Command::RemoveVirtualTool {
-                virtual_tool_id: virtual_tool_id.clone(),
-            },
-            operation: OperationInfo {
-                id: operation_id(),
-                label: format!("Remove {}", virtual_tool.user_label),
-                kind: OperationKind::RemoveVirtualTool,
-                state: OperationState::Pending,
-                progress: 0,
-                download: None,
-                release_id: virtual_tool.current_payload_release_id.clone(),
-                installed_tool_id: virtual_tool.installed_tool_id.clone(),
-                virtual_tool_id: Some(virtual_tool_id),
             },
         };
 
@@ -763,15 +358,6 @@ impl WineCask {
         drop(app_state);
         self.broadcast_notification(peer_map, "Operation not found")
             .await;
-    }
-
-    async fn sync_public_queue_snapshot(&self) {
-        let mut app_state = self.app_state.lock().await;
-        app_state.queued_operations = app_state
-            .operation_queue
-            .iter()
-            .map(|queued| queued.operation.clone())
-            .collect();
     }
 
     pub async fn broadcast_app_state(&self, peer_map: &PeerMap) {
@@ -882,8 +468,6 @@ impl WineCask {
 
     pub fn list_compatibility_tools(&self) -> Option<Vec<InstalledCompatibilityTool>> {
         let compat_tools = self.steam_util.list_compatibility_tools().ok()?;
-        let compatibility_tools_directory =
-            self.steam_util.get_steam_compatibility_tools_directory();
 
         let mut installed_tools = Vec::new();
 
@@ -901,13 +485,6 @@ impl WineCask {
                 github_release: None,
                 catalog_release_id: None,
                 requires_restart: false,
-                source: InstalledToolSource::Direct,
-                virtual_tool_id: None,
-                user_label: None,
-                can_link_to_virtual_tool: can_link_source_path(
-                    &compatibility_tools_directory,
-                    &compat_tool.path,
-                ),
             });
         }
 
@@ -993,33 +570,15 @@ impl WineCask {
             )
         };
 
-        let virtual_manifest = self.load_virtual_tool_manifest();
         let visible_tool_names: HashSet<String> = steam_visible_tools
             .iter()
             .map(|tool| tool.str_tool_name.clone())
             .collect();
-        let catalog_lookup = build_catalog_lookup(&catalog_flavors);
 
         let mut installed_tools = self.list_compatibility_tools().unwrap_or_default();
         for installed_tool in &mut installed_tools {
             installed_tool.requires_restart =
                 !visible_tool_names.contains(&installed_tool.internal_name);
-
-            if let Some(virtual_tool_config) = virtual_manifest.tools.iter().find(|config| {
-                config.directory_name == installed_tool.directory_name
-                    || config.steam_internal_name == installed_tool.internal_name
-            }) {
-                installed_tool.source = InstalledToolSource::Virtual;
-                installed_tool.virtual_tool_id = Some(virtual_tool_config.id.clone());
-                installed_tool.user_label = Some(virtual_tool_config.user_label.clone());
-                installed_tool.can_link_to_virtual_tool = false;
-            }
-        }
-
-        for installed_tool in installed_tools
-            .iter_mut()
-            .filter(|tool| matches!(&tool.source, InstalledToolSource::Direct))
-        {
             if let Some(catalog_release) =
                 find_catalog_release_for_tool(&catalog_flavors, installed_tool)
             {
@@ -1027,117 +586,8 @@ impl WineCask {
             }
         }
 
-        let direct_tools: Vec<InstalledCompatibilityTool> = installed_tools
-            .iter()
-            .filter(|tool| matches!(&tool.source, InstalledToolSource::Direct))
-            .cloned()
-            .collect();
-
-        for installed_tool in installed_tools
-            .iter_mut()
-            .filter(|tool| matches!(&tool.source, InstalledToolSource::Virtual))
-        {
-            let Some(virtual_tool_config) =
-                installed_tool
-                    .virtual_tool_id
-                    .as_ref()
-                    .and_then(|virtual_tool_id| {
-                        virtual_manifest
-                            .tools
-                            .iter()
-                            .find(|config| &config.id == virtual_tool_id)
-                    })
-            else {
-                continue;
-            };
-
-            if let Some(linked_source) = find_live_linked_source(virtual_tool_config, &direct_tools)
-            {
-                installed_tool.flavor = linked_source.flavor.clone();
-                installed_tool.catalog_release_id = linked_source.catalog_release_id.clone();
-                installed_tool.github_release = linked_source.github_release.clone();
-            } else {
-                if let Some(release_id) = &virtual_tool_config.current_payload_release_id {
-                    if let Some(catalog_release) = catalog_lookup.get(release_id) {
-                        apply_catalog_release(installed_tool, catalog_release);
-                    } else {
-                        installed_tool.catalog_release_id = Some(release_id.clone());
-                    }
-                }
-                installed_tool.flavor = virtual_tool_config
-                    .current_payload_flavor
-                    .clone()
-                    .unwrap_or_else(|| installed_tool.flavor.clone());
-            }
-        }
-
-        let virtual_tools = virtual_manifest
-            .tools
-            .iter()
-            .map(|virtual_tool_config| {
-                let installed_tool = installed_tools.iter().find(|tool| {
-                    tool.virtual_tool_id.as_deref() == Some(virtual_tool_config.id.as_str())
-                });
-                let linked_source = find_live_linked_source(virtual_tool_config, &direct_tools);
-                let current_payload_release_id = if let Some(linked_source) = linked_source {
-                    linked_source.catalog_release_id.clone()
-                } else {
-                    virtual_tool_config.current_payload_release_id.clone()
-                };
-                let current_payload_release = current_payload_release_id
-                    .as_ref()
-                    .and_then(|release_id| catalog_lookup.get(release_id));
-                let github_release = linked_source
-                    .and_then(|source| source.github_release.clone())
-                    .or_else(|| {
-                        current_payload_release
-                            .map(|catalog_release| catalog_release.release.clone())
-                    });
-                let current_payload_name = linked_source
-                    .map(|source| source.display_name.clone())
-                    .or_else(|| {
-                        github_release
-                            .as_ref()
-                            .map(|release| release.tag_name.clone())
-                    })
-                    .or_else(|| virtual_tool_config.current_payload_name.clone());
-                let current_payload_flavor = linked_source
-                    .map(|source| source.flavor.clone())
-                    .or_else(|| current_payload_release.map(|release| release.flavor.clone()))
-                    .or_else(|| virtual_tool_config.current_payload_flavor.clone())
-                    .unwrap_or(CompatibilityToolFlavor::Unknown);
-                let has_linked_source = virtual_tool_config
-                    .linked_source_installed_tool_id
-                    .is_some()
-                    || virtual_tool_config.linked_source_directory_name.is_some();
-
-                VirtualCompatibilityTool {
-                    id: virtual_tool_config.id.clone(),
-                    user_label: virtual_tool_config.user_label.clone(),
-                    steam_internal_name: virtual_tool_config.steam_internal_name.clone(),
-                    directory_name: virtual_tool_config.directory_name.clone(),
-                    installed_tool_id: installed_tool.map(|tool| tool.id.clone()),
-                    current_payload_release_id,
-                    current_payload_name,
-                    current_payload_flavor,
-                    github_release,
-                    linked_source_installed_tool_id: virtual_tool_config
-                        .linked_source_installed_tool_id
-                        .clone(),
-                    linked_source_missing: has_linked_source && linked_source.is_none(),
-                    requires_restart: installed_tool
-                        .map(|tool| tool.requires_restart)
-                        .unwrap_or(true),
-                    used_by_games: installed_tool
-                        .map(|tool| tool.used_by_games.clone())
-                        .unwrap_or_default(),
-                }
-            })
-            .collect();
-
         let mut app_state = self.app_state.lock().await;
         app_state.installed_tools = installed_tools;
-        app_state.virtual_tools = virtual_tools;
     }
 
     pub async fn check_for_flavor_updates(&self, peer_map: &PeerMap, renew_cache: bool) {
@@ -1173,18 +623,6 @@ impl WineCask {
             .cloned()
     }
 
-    pub async fn get_virtual_tool(
-        &self,
-        virtual_tool_id: &str,
-    ) -> Option<VirtualCompatibilityTool> {
-        self.app_state
-            .lock()
-            .await
-            .virtual_tools
-            .iter()
-            .find(|tool| tool.id == virtual_tool_id)
-            .cloned()
-    }
 }
 
 fn operation_id() -> String {
@@ -1193,36 +631,6 @@ fn operation_id() -> String {
         .expect("Failed to calculate current timestamp")
         .as_nanos();
     format!("operation-{}", timestamp)
-}
-
-fn build_catalog_lookup(catalog_flavors: &[Flavor]) -> HashMap<String, CatalogRelease> {
-    catalog_flavors
-        .iter()
-        .flat_map(|flavor| flavor.releases.iter())
-        .map(|release| (release.id.clone(), release.clone()))
-        .collect()
-}
-
-fn find_live_linked_source<'a>(
-    virtual_tool: &VirtualToolConfig,
-    direct_tools: &'a [InstalledCompatibilityTool],
-) -> Option<&'a InstalledCompatibilityTool> {
-    let has_linked_source = virtual_tool.linked_source_installed_tool_id.is_some()
-        || virtual_tool.linked_source_directory_name.is_some();
-    has_linked_source.then_some(())?;
-
-    direct_tools.iter().find(|tool| {
-        virtual_tool
-            .linked_source_installed_tool_id
-            .as_ref()
-            .map(|source_id| source_id == &tool.id)
-            .unwrap_or(true)
-            && virtual_tool
-                .linked_source_directory_name
-                .as_ref()
-                .map(|directory_name| directory_name == &tool.directory_name)
-                .unwrap_or(true)
-    })
 }
 
 fn find_catalog_release_for_tool(
@@ -1305,34 +713,6 @@ fn apply_catalog_release(
     installed_tool.github_release = Some(catalog_release.release.clone());
 }
 
-fn install_operation_matches_target(
-    operation: &OperationInfo,
-    release_id: &str,
-    target: &InstallTarget,
-) -> bool {
-    operation.kind == OperationKind::Install
-        && operation.release_id.as_deref() == Some(release_id)
-        && match target {
-            InstallTarget::Direct => operation.virtual_tool_id.is_none(),
-            InstallTarget::VirtualTool { virtual_tool_id } => {
-                operation.virtual_tool_id.as_deref() == Some(virtual_tool_id)
-            }
-        }
-}
-
-fn duplicate_install_notification_message(target: &InstallTarget) -> &'static str {
-    match target {
-        InstallTarget::Direct => "That release is already queued or installing",
-        InstallTarget::VirtualTool { .. } => {
-            "That virtual tool already has an active or queued operation"
-        }
-    }
-}
-
-fn operation_targets_virtual_tool(operation: &OperationInfo, virtual_tool_id: &str) -> bool {
-    operation.virtual_tool_id.as_deref() == Some(virtual_tool_id)
-}
-
 fn operation_targets_installed_tool(operation: &OperationInfo, installed_tool_id: &str) -> bool {
     operation.installed_tool_id.as_deref() == Some(installed_tool_id)
 }
@@ -1385,12 +765,15 @@ fn is_download_progress_update_throttled(
         && last_operation.label == next_operation.label
         && last_operation.release_id == next_operation.release_id
         && last_operation.installed_tool_id == next_operation.installed_tool_id
-        && last_operation.virtual_tool_id == next_operation.virtual_tool_id
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::github_util::Release;
+    use crate::wine_cask::generate_compatibility_tool_vdf;
+    use std::fs;
+    use std::path::PathBuf;
 
     fn operation(state: OperationState, progress: u8) -> OperationInfo {
         OperationInfo {
@@ -1402,7 +785,6 @@ mod tests {
             download: None,
             release_id: Some("release-1".to_string()),
             installed_tool_id: None,
-            virtual_tool_id: None,
         }
     }
 
@@ -1419,11 +801,10 @@ mod tests {
         mappings_stale: bool,
     ) -> WineCask {
         WineCask {
-            steam_util: SteamUtil::new(steam_path.clone()),
+            steam_util: SteamUtil::new(steam_path),
             app_state: Arc::new(Mutex::new(AppState {
                 catalog_flavors: Vec::new(),
                 installed_tools: Vec::new(),
-                virtual_tools: Vec::new(),
                 app_compat_tool_mappings: mappings,
                 app_compat_tool_mappings_stale: mappings_stale,
                 current_operation: None,
@@ -1437,25 +818,112 @@ mod tests {
             })),
             operation_broadcast_cache: Arc::new(Mutex::new(None)),
             queue_notify: Arc::new(Notify::new()),
-            virtual_tool_manifest_path: steam_path.join("virtual_tools.json"),
         }
     }
 
-    #[test]
-    fn skips_identical_operation_snapshots() {
-        let now = Instant::now();
-        let current_snapshot = snapshot(OperationState::Downloading, 37);
-        let last_broadcast = (current_snapshot.clone(), now);
+    async fn catalog_test_app(steam_path: PathBuf) -> WineCask {
+        let app = mapping_test_app(steam_path, HashMap::new(), false);
+        app.app_state.lock().await.catalog_flavors = vec![Flavor {
+            flavor: CompatibilityToolFlavor::ProtonGE,
+            releases: vec![CatalogRelease {
+                id: "release-1".to_string(),
+                flavor: CompatibilityToolFlavor::ProtonGE,
+                release: Release {
+                    id: 1,
+                    tag_name: "GE-Proton11-6".to_string(),
+                    name: "GE-Proton11-6".to_string(),
+                    url: String::new(),
+                    draft: false,
+                    prerelease: false,
+                    assets: Vec::new(),
+                    created_at: String::new(),
+                    published_at: String::new(),
+                    tarball_url: String::new(),
+                    body: String::new(),
+                },
+            }],
+        }];
+        app
+    }
 
-        assert!(should_skip_operation_broadcast(
-            Some(&last_broadcast),
-            &current_snapshot,
-            now + Duration::from_millis(50),
-        ));
+    #[tokio::test]
+    async fn install_queue_rejects_duplicates_and_can_retry_after_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        let app = catalog_test_app(directory.path().to_path_buf()).await;
+        let peers = PeerMap::new(Mutex::new(HashMap::new()));
+        let command: Command = serde_json::from_str(
+            r#"{"type":"InstallCatalogRelease","release_id":"release-1"}"#,
+        )
+        .unwrap();
+        let Command::InstallCatalogRelease { release_id } = command else {
+            panic!("Expected an install command");
+        };
+
+        for _ in 0..2 {
+            app.queue_install_catalog_release(release_id.clone(), &peers).await;
+        }
+        assert_eq!(app.app_state.lock().await.operation_queue.len(), 1);
+        assert_eq!(app.app_state.lock().await.queued_operations.len(), 1);
+
+        let active = app.begin_next_operation(&peers).await.unwrap();
+        app.queue_install_catalog_release(release_id.clone(), &peers).await;
+        assert!(app.app_state.lock().await.operation_queue.is_empty());
+        app.cancel_operation(active.operation.id, &peers).await;
+        app.queue_install_catalog_release(release_id.clone(), &peers).await;
+        assert!(app.app_state.lock().await.operation_queue.is_empty());
+        app.complete_current_operation(&peers).await;
+
+        app.queue_install_catalog_release(release_id, &peers).await;
+        let queued_id = app.app_state.lock().await.queued_operations[0].id.clone();
+        app.cancel_operation(queued_id, &peers).await;
+        let state = app.app_state.lock().await;
+        assert!(state.operation_queue.is_empty());
+        assert!(state.queued_operations.is_empty());
+    }
+
+    #[tokio::test]
+    async fn installed_release_can_be_queued_again_after_removal() {
+        let directory = tempfile::tempdir().unwrap();
+        let tool_path = directory.path().join("compatibilitytools.d/GE-Proton11-6-x86_64");
+        fs::create_dir_all(&tool_path).unwrap();
+        generate_compatibility_tool_vdf(
+            tool_path.join("compatibilitytool.vdf"),
+            "GE-Proton11-6-x86_64",
+            "GE-Proton11-6",
+        ).unwrap();
+        let app = catalog_test_app(directory.path().to_path_buf()).await;
+        let peers = PeerMap::new(Mutex::new(HashMap::new()));
+        app.sync_backend_state().await;
+        let installed = app.app_state.lock().await.installed_tools[0].clone();
+        assert_eq!(installed.catalog_release_id.as_deref(), Some("release-1"));
+        assert!(installed.requires_restart);
+        app.process_frontend_compat_tools_update(&peers, vec![SteamClientCompatToolInfo {
+            str_tool_name: installed.internal_name.clone(),
+            str_display_name: installed.display_name.clone(),
+        }]).await;
+        assert!(!app.app_state.lock().await.installed_tools[0].requires_restart);
+
+        app.queue_install_catalog_release("release-1".to_string(), &peers).await;
+        app.queue_install_catalog_release("unknown".to_string(), &peers).await;
+        assert!(app.app_state.lock().await.operation_queue.is_empty());
+        for _ in 0..2 {
+            app.queue_uninstall_installed_tool(installed.id.clone(), &peers).await;
+        }
+        assert_eq!(app.app_state.lock().await.operation_queue.len(), 1);
+        app.begin_next_operation(&peers).await.unwrap();
+        app.queue_uninstall_installed_tool(installed.id.clone(), &peers).await;
+        assert!(app.app_state.lock().await.operation_queue.is_empty());
+        app.uninstall_installed_tool(installed.id, &peers).await;
+        app.complete_current_operation(&peers).await;
+        assert!(!tool_path.exists());
+        assert!(app.app_state.lock().await.installed_tools.is_empty());
+
+        app.queue_install_catalog_release("release-1".to_string(), &peers).await;
+        assert_eq!(app.app_state.lock().await.operation_queue.len(), 1);
     }
 
     #[test]
-    fn throttles_rapid_download_progress_updates() {
+    fn throttles_download_progress_until_interval_elapses() {
         let now = Instant::now();
         let last_broadcast = (snapshot(OperationState::Downloading, 37), now);
         let next_snapshot = snapshot(OperationState::Downloading, 38);
@@ -1465,14 +933,6 @@ mod tests {
             &next_snapshot,
             now + Duration::from_millis(50),
         ));
-    }
-
-    #[test]
-    fn allows_download_progress_updates_after_throttle_window() {
-        let now = Instant::now();
-        let last_broadcast = (snapshot(OperationState::Downloading, 37), now);
-        let next_snapshot = snapshot(OperationState::Downloading, 38);
-
         assert!(!should_skip_operation_broadcast(
             Some(&last_broadcast),
             &next_snapshot,
@@ -1597,7 +1057,6 @@ mod tests {
             app_state: Arc::new(Mutex::new(AppState {
                 catalog_flavors: Vec::new(),
                 installed_tools: Vec::new(),
-                virtual_tools: Vec::new(),
                 app_compat_tool_mappings: HashMap::new(),
                 app_compat_tool_mappings_stale: true,
                 current_operation: Some(operation(OperationState::Downloading, 0)),
@@ -1611,7 +1070,6 @@ mod tests {
             })),
             operation_broadcast_cache: Arc::new(Mutex::new(None)),
             queue_notify: Arc::new(Notify::new()),
-            virtual_tool_manifest_path: directory.path().join("virtual_tools.json"),
         };
         let peers = PeerMap::new(Mutex::new(HashMap::new()));
         let download = DownloadProgress {
@@ -1730,43 +1188,4 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn linked_source_resolution_requires_persisted_identity_fields() {
-        let direct_tool = InstalledCompatibilityTool {
-            id: "installed:GE-Proton".to_string(),
-            path: "/compatibilitytools.d/GE-Proton".to_string(),
-            directory_name: "GE-Proton".to_string(),
-            display_name: "GE-Proton 11".to_string(),
-            internal_name: "GE-Proton11".to_string(),
-            used_by_games: Vec::new(),
-            requires_restart: false,
-            flavor: CompatibilityToolFlavor::ProtonGE,
-            catalog_release_id: Some("catalog:ProtonGE:11".to_string()),
-            github_release: None,
-            source: InstalledToolSource::Direct,
-            virtual_tool_id: None,
-            user_label: None,
-            can_link_to_virtual_tool: true,
-        };
-        let virtual_tool = VirtualToolConfig {
-            id: "virtual-1".to_string(),
-            user_label: "Stable".to_string(),
-            steam_internal_name: "WineCellarVirtual1".to_string(),
-            directory_name: "WineCellarVirtual1".to_string(),
-            current_payload_release_id: None,
-            current_payload_name: None,
-            current_payload_flavor: None,
-            linked_source_installed_tool_id: Some("installed:GE-Proton".to_string()),
-            linked_source_directory_name: Some("GE-Proton".to_string()),
-            pending_payload_transaction: None,
-        };
-
-        let tools = vec![direct_tool];
-        let resolved = find_live_linked_source(&virtual_tool, &tools).unwrap();
-        assert_eq!(resolved.display_name, "GE-Proton 11");
-
-        let mut stale_identity = virtual_tool;
-        stale_identity.linked_source_directory_name = Some("Other-Proton".to_string());
-        assert!(find_live_linked_source(&stale_identity, &tools).is_none());
-    }
 }

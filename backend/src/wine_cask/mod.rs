@@ -10,9 +10,7 @@ pub mod app;
 pub mod download_progress;
 pub mod flavors;
 pub mod install;
-pub mod link;
 pub mod uninstall;
-pub mod virtual_tools;
 
 pub fn generate_compatibility_tool_vdf<P: AsRef<Path>>(
     path: P,
@@ -93,11 +91,11 @@ mod tests {
         let directory = tempdir().expect("Failed to create temp directory");
         let vdf_path = directory.path().join("compatibilitytool.vdf");
 
-        generate_compatibility_tool_vdf(&vdf_path, r#"Wine"Cellar\Virtual"#, "Display\nName")
+        generate_compatibility_tool_vdf(&vdf_path, r#"Wine"Cellar\Tool"#, "Display\nName")
             .expect("Failed to generate VDF");
 
         let contents = fs::read_to_string(vdf_path).expect("Failed to read VDF");
-        assert!(contents.contains(r#""Wine\"Cellar\\Virtual""#));
+        assert!(contents.contains(r#""Wine\"Cellar\\Tool""#));
         assert!(contents.contains(r#""display_name" "Display\nName""#));
     }
 }
@@ -108,24 +106,9 @@ pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
     loop {
         if let Some(queued_operation) = wine_cask.begin_next_operation(&peer_map).await {
             match queued_operation.command {
-                Command::InstallCatalogRelease { release_id, target } => {
+                Command::InstallCatalogRelease { release_id } => {
                     wine_cask
-                        .install_catalog_release(release_id, target, &peer_map)
-                        .await;
-                }
-                Command::LinkInstalledToolToVirtualTool {
-                    installed_tool_id,
-                    virtual_tool_id,
-                } => {
-                    wine_cask
-                        .update_current_operation(OperationState::Running, 0, &peer_map)
-                        .await;
-                    wine_cask
-                        .link_installed_tool_to_virtual_tool(
-                            installed_tool_id,
-                            virtual_tool_id,
-                            &peer_map,
-                        )
+                        .install_catalog_release(release_id, &peer_map)
                         .await;
                 }
                 Command::UninstallInstalledTool { installed_tool_id } => {
@@ -134,57 +117,6 @@ pub async fn process_queue(wine_cask: Arc<WineCask>, peer_map: PeerMap) {
                         .await;
                     wine_cask
                         .uninstall_installed_tool(installed_tool_id, &peer_map)
-                        .await;
-                }
-                Command::CreateVirtualTool { user_label } => {
-                    wine_cask
-                        .update_current_operation(OperationState::Running, 0, &peer_map)
-                        .await;
-                    match wine_cask.create_virtual_tool_slot(user_label) {
-                        Ok(label) => {
-                            wine_cask.sync_backend_state().await;
-                            wine_cask.broadcast_app_state(&peer_map).await;
-                            wine_cask
-                                .broadcast_notification(
-                                    &peer_map,
-                                    &format!("Created virtual compatibility tool: {}", label),
-                                )
-                                .await;
-                        }
-                        Err(err) => {
-                            wine_cask.broadcast_notification(&peer_map, &err).await;
-                        }
-                    }
-                }
-                Command::RenameVirtualTool {
-                    virtual_tool_id,
-                    user_label,
-                } => {
-                    wine_cask
-                        .update_current_operation(OperationState::Running, 0, &peer_map)
-                        .await;
-                    match wine_cask.rename_virtual_tool_slot(&virtual_tool_id, user_label) {
-                        Ok(label) => {
-                            wine_cask.sync_backend_state().await;
-                            wine_cask.broadcast_app_state(&peer_map).await;
-                            wine_cask
-                                .broadcast_notification(
-                                    &peer_map,
-                                    &format!("Renamed virtual compatibility tool to {}", label),
-                                )
-                                .await;
-                        }
-                        Err(err) => {
-                            wine_cask.broadcast_notification(&peer_map, &err).await;
-                        }
-                    }
-                }
-                Command::RemoveVirtualTool { virtual_tool_id } => {
-                    wine_cask
-                        .update_current_operation(OperationState::Running, 0, &peer_map)
-                        .await;
-                    wine_cask
-                        .remove_virtual_tool(virtual_tool_id, &peer_map)
                         .await;
                 }
                 Command::RefreshCatalog | Command::CancelOperation { .. } => {}

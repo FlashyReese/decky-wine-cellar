@@ -6,9 +6,8 @@ mod wine_cask;
 use crate::multilogger::MultiLogger;
 use crate::steam_util::SteamUtil;
 use crate::wine_cask::app::{
-    AppState, Command, InstallTarget, MessageEnvelope, MessageType, UpdaterState, WineCask,
+    AppState, Command, MessageEnvelope, MessageType, UpdaterState, WineCask,
 };
-use crate::wine_cask::flavors::InstalledToolSource;
 use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, stream::TryStreamExt, StreamExt};
 use log::{error, info, warn, Level};
@@ -47,7 +46,6 @@ async fn main() -> Result<(), IoError> {
     let app_state = AsyncAppState::new(Mutex::new(AppState {
         catalog_flavors: Vec::new(),
         installed_tools: Vec::new(),
-        virtual_tools: Vec::new(),
         app_compat_tool_mappings: HashMap::new(),
         app_compat_tool_mappings_stale: true,
         current_operation: None,
@@ -65,7 +63,6 @@ async fn main() -> Result<(), IoError> {
         app_state,
         operation_broadcast_cache: Arc::new(Mutex::new(None)),
         queue_notify: queue_notify.clone(),
-        virtual_tool_manifest_path: get_virtual_tool_manifest_path(),
     };
 
     initialize_app_state(&wine_cask).await;
@@ -220,22 +217,7 @@ fn get_steam_directory() -> Result<PathBuf, IoError> {
     result.map_err(|err| IoError::new(ErrorKind::NotFound, err.to_string()))
 }
 
-fn get_virtual_tool_manifest_path() -> PathBuf {
-    let base_dir = env::var("DECKY_PLUGIN_SETTINGS_DIR")
-        .or_else(|_| env::var("DECKY_PLUGIN_RUNTIME_DIR"))
-        .unwrap_or_else(|_| "/tmp/decky-wine-cellar".to_string());
-    PathBuf::from(base_dir).join("virtual_tools.json")
-}
-
 async fn initialize_app_state(wine_cask: &WineCask) {
-    /* TODO: WIP - virtual tool recovery.
-    if let Err(err) = wine_cask.reconcile_virtual_tool_payload_transactions() {
-        error!(
-            "Failed to reconcile interrupted virtual tool operation: {}",
-            err
-        );
-    }
-    */
     wine_cask.sync_backend_state().await;
 }
 
@@ -276,80 +258,18 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
                     Command::RefreshCatalog => {
                         wine_cask.check_for_flavor_updates(peer_map, true).await;
                     }
-                    Command::InstallCatalogRelease {
-                        release_id,
-                        target: InstallTarget::Direct,
-                    } => {
+                    Command::InstallCatalogRelease { release_id } => {
                         wine_cask
-                            .queue_install_catalog_release(
-                                release_id,
-                                InstallTarget::Direct,
-                                peer_map,
-                            )
+                            .queue_install_catalog_release(release_id, peer_map)
                             .await;
                     }
-                    /* TODO: WIP - virtual install targets and linking.
-                    Command::InstallCatalogRelease { release_id, target } => {
-                        wine_cask
-                            .queue_install_catalog_release(release_id, target, peer_map)
-                            .await;
-                    }
-                    Command::LinkInstalledToolToVirtualTool {
-                        installed_tool_id,
-                        virtual_tool_id,
-                    } => {
-                        wine_cask
-                            .queue_link_installed_tool_to_virtual_tool(
-                                installed_tool_id,
-                                virtual_tool_id,
-                                peer_map,
-                            )
-                            .await;
-                    }
-                    */
                     Command::UninstallInstalledTool { installed_tool_id } => {
-                        // TODO: WIP - keep virtual slots out of the shared uninstall route.
-                        if wine_cask
-                            .get_installed_tool(&installed_tool_id)
-                            .await
-                            .is_some_and(|tool| matches!(tool.source, InstalledToolSource::Virtual))
-                        {
-                            wine_cask
-                                .broadcast_notification(peer_map, "Error: Virtual tools are disabled")
-                                .await;
-                            return;
-                        }
                         wine_cask
                             .queue_uninstall_installed_tool(installed_tool_id, peer_map)
                             .await;
                     }
                     Command::CancelOperation { operation_id } => {
                         wine_cask.cancel_operation(operation_id, peer_map).await;
-                    }
-                    /* TODO: WIP - virtual tool management commands.
-                    Command::CreateVirtualTool { user_label } => {
-                        wine_cask
-                            .queue_create_virtual_tool(user_label, peer_map)
-                            .await;
-                    }
-                    Command::RenameVirtualTool {
-                        virtual_tool_id,
-                        user_label,
-                    } => {
-                        wine_cask
-                            .queue_rename_virtual_tool(virtual_tool_id, user_label, peer_map)
-                            .await;
-                    }
-                    Command::RemoveVirtualTool { virtual_tool_id } => {
-                        wine_cask
-                            .queue_remove_virtual_tool(virtual_tool_id, peer_map)
-                            .await;
-                    }
-                    */
-                    _ => {
-                        wine_cask
-                            .broadcast_notification(peer_map, "Error: Virtual tools are disabled")
-                            .await;
                     }
                 }
             } else {
@@ -387,15 +307,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_different_origin() {
-        let request = request_with_origin(Some("https://example.com"));
-
-        let rejection = validate_websocket_origin(&request, Response::new(()))
-            .expect_err("a foreign Origin must be rejected");
-        assert_eq!(rejection.status(), StatusCode::FORBIDDEN);
-    }
-
-    #[test]
     fn rejects_a_missing_origin() {
         let request = request_with_origin(None);
 
@@ -405,14 +316,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_origin_lookalikes_and_default_port_variants() {
+    fn rejects_untrusted_origins() {
         for origin in [
+            "https://example.com",
             "https://steamloopback.host.example.com",
             "https://steamloopback.host:443",
             "http://steamloopback.host",
         ] {
             let request = request_with_origin(Some(origin));
-            assert!(validate_websocket_origin(&request, Response::new(())).is_err());
+            let rejection = validate_websocket_origin(&request, Response::new(()))
+                .expect_err("an untrusted Origin must be rejected");
+            assert_eq!(rejection.status(), StatusCode::FORBIDDEN);
         }
     }
 

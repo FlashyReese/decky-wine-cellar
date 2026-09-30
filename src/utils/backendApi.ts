@@ -1,7 +1,6 @@
 import {
   Command,
   CommandType,
-  InstallTargetType,
   MessageEnvelope,
   MessageType,
 } from "../types";
@@ -48,40 +47,8 @@ export function installCatalogRelease(socket: WebSocket, releaseId: string): voi
   sendCommand(socket, {
     type: CommandType.InstallCatalogRelease,
     release_id: releaseId,
-    target: {
-      type: InstallTargetType.Direct,
-    },
   });
 }
-
-/* TODO: WIP - virtual tool install and link requests.
-export function mountCatalogReleaseToVirtualTool(
-  socket: WebSocket,
-  releaseId: string,
-  virtualToolId: string,
-): void {
-  sendCommand(socket, {
-    type: CommandType.InstallCatalogRelease,
-    release_id: releaseId,
-    target: {
-      type: InstallTargetType.VirtualTool,
-      virtual_tool_id: virtualToolId,
-    },
-  });
-}
-
-export function linkInstalledToolToVirtualTool(
-  socket: WebSocket,
-  installedToolId: string,
-  virtualToolId: string,
-): void {
-  sendCommand(socket, {
-    type: CommandType.LinkInstalledToolToVirtualTool,
-    installed_tool_id: installedToolId,
-    virtual_tool_id: virtualToolId,
-  });
-}
-*/
 
 export function uninstallInstalledTool(
   socket: WebSocket,
@@ -99,34 +66,3 @@ export function cancelOperation(socket: WebSocket, operationId: string): void {
     operation_id: operationId,
   });
 }
-
-/* TODO: WIP - virtual tool management requests.
-export function createVirtualTool(socket: WebSocket, userLabel: string): void {
-  sendCommand(socket, {
-    type: CommandType.CreateVirtualTool,
-    user_label: userLabel,
-  });
-}
-
-export function renameVirtualTool(
-  socket: WebSocket,
-  virtualToolId: string,
-  userLabel: string,
-): void {
-  sendCommand(socket, {
-    type: CommandType.RenameVirtualTool,
-    virtual_tool_id: virtualToolId,
-    user_label: userLabel,
-  });
-}
-
-export function removeVirtualTool(
-  socket: WebSocket,
-  virtualToolId: string,
-): void {
-  sendCommand(socket, {
-    type: CommandType.RemoveVirtualTool,
-    virtual_tool_id: virtualToolId,
-  });
-}
-*/

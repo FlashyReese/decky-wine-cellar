@@ -167,27 +167,6 @@ export default function ApplicationsTab({
   const compatibilityMappings = appState.app_compat_tool_mappings ?? {};
   const compatibilityMappingsStale =
     appState.app_compat_tool_mappings_stale ?? true;
-  const unavailableVirtualToolReasons = useMemo(() => {
-    const reasons = new Map<string, string>();
-    appState.virtual_tools.forEach((tool) => {
-      reasons.set(tool.steam_internal_name, "virtual tools are disabled");
-      /* TODO: WIP - allow virtual tool selection once available.
-      if (tool.linked_source_missing) {
-        reasons.set(tool.steam_internal_name, "its linked source is missing");
-      } else if (
-        tool.current_payload_name == null &&
-        tool.current_payload_release_id == null &&
-        tool.linked_source_installed_tool_id == null
-      ) {
-        reasons.set(tool.steam_internal_name, "it has no payload");
-      }
-      */
-    });
-    return reasons;
-  }, [appState.virtual_tools]);
-  const unavailableVirtualToolNamesKey = [...unavailableVirtualToolReasons.keys()]
-    .sort()
-    .join("\0");
   const toolDisplayNames = useMemo(() => {
     const names = new Map<string, string>();
     (appState.steam_visible_tools ?? []).forEach((tool) => {
@@ -198,24 +177,8 @@ export default function ApplicationsTab({
         names.set(tool.internal_name, tool.display_name || tool.internal_name);
       }
     });
-    appState.virtual_tools.forEach((tool) => {
-      const unavailableReason = unavailableVirtualToolReasons.get(
-        tool.steam_internal_name,
-      );
-      names.set(
-        tool.steam_internal_name,
-        unavailableReason == null
-          ? tool.user_label
-          : `${tool.user_label} (${unavailableReason})`,
-      );
-    });
     return names;
-  }, [
-    appState.installed_tools,
-    appState.steam_visible_tools,
-    appState.virtual_tools,
-    unavailableVirtualToolReasons,
-  ]);
+  }, [appState.installed_tools, appState.steam_visible_tools]);
   const optimisticAssignmentsRef = useRef(optimisticAssignments);
   optimisticAssignmentsRef.current = optimisticAssignments;
 
@@ -249,10 +212,6 @@ export default function ApplicationsTab({
     toolLoads.current.clear();
     setToolOptions({});
   }, []);
-
-  useEffect(() => {
-    resetToolOptions();
-  }, [resetToolOptions, unavailableVirtualToolNamesKey]);
 
   const requestLatestState = useCallback(() => {
     try {
@@ -415,12 +374,9 @@ export default function ApplicationsTab({
           return;
         }
 
-        const selectableTools = tools.filter(
-          (tool) => !unavailableVirtualToolReasons.has(tool.strToolName),
-        );
         setToolOptions((current) => ({
           ...current,
-          [key]: { status: "ready", tools: selectableTools },
+          [key]: { status: "ready", tools },
         }));
 
         requestAnimationFrame(() => {
@@ -448,7 +404,7 @@ export default function ApplicationsTab({
         }
       }
     },
-    [toolOptions, unavailableVirtualToolReasons],
+    [toolOptions],
   );
 
   const selectCompatTool = useCallback(
@@ -655,8 +611,6 @@ export default function ApplicationsTab({
                       )?.strDisplayName ||
                       toolDisplayNames.get(assignedToolName) ||
                       assignedToolName;
-                const unavailableAssignmentReason =
-                  unavailableVirtualToolReasons.get(assignedToolName);
 
                 return (
                   <li key={key} style={{ margin: 0, padding: 0 }}>
@@ -685,12 +639,6 @@ export default function ApplicationsTab({
                           {assignmentError != null && (
                             <div role="alert" style={{ color: "#ff9f9f" }}>
                               {assignmentError}
-                            </div>
-                          )}
-                          {unavailableAssignmentReason != null && (
-                            <div role="alert" style={{ color: "#ff9f9f" }}>
-                              This virtual tool cannot be used because {unavailableAssignmentReason}.
-                              Choose another tool or repair it on the Dashboard.
                             </div>
                           )}
                         </div>

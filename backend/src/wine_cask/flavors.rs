@@ -44,12 +44,6 @@ pub struct Flavor {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub enum InstalledToolSource {
-    Direct,
-    Virtual,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
 pub struct InstalledCompatibilityTool {
     pub id: String,
     pub path: String,
@@ -61,27 +55,6 @@ pub struct InstalledCompatibilityTool {
     pub flavor: CompatibilityToolFlavor,
     pub catalog_release_id: Option<String>,
     pub github_release: Option<Release>,
-    pub source: InstalledToolSource,
-    pub virtual_tool_id: Option<String>,
-    pub user_label: Option<String>,
-    pub can_link_to_virtual_tool: bool,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct VirtualCompatibilityTool {
-    pub id: String,
-    pub user_label: String,
-    pub steam_internal_name: String,
-    pub directory_name: String,
-    pub installed_tool_id: Option<String>,
-    pub current_payload_release_id: Option<String>,
-    pub current_payload_name: Option<String>,
-    pub current_payload_flavor: CompatibilityToolFlavor,
-    pub github_release: Option<Release>,
-    pub linked_source_installed_tool_id: Option<String>,
-    pub linked_source_missing: bool,
-    pub requires_restart: bool,
-    pub used_by_games: Vec<String>,
 }
 
 // SteamClient.Settings.GetGlobalCompatTools()

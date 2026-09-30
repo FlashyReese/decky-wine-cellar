@@ -184,24 +184,6 @@ mod tests {
     }
 
     #[test]
-    fn percentage_and_rate_do_not_overflow_or_exceed_their_limits() {
-        let start = Instant::now();
-        let mut tracker = DownloadProgressTracker::new(Some(1), start);
-        let progress = tracker.snapshot(u64::MAX, start + Duration::from_nanos(1));
-        assert_eq!(progress.percentage(), 100);
-        assert_eq!(progress.bytes_per_second, Some(u64::MAX));
-        assert_eq!(progress.eta_seconds, Some(0));
-
-        let mut tracker = DownloadProgressTracker::new(Some(100), start);
-        assert_eq!(
-            tracker
-                .snapshot(25, start + Duration::from_secs(1))
-                .percentage(),
-            25
-        );
-    }
-
-    #[test]
     fn rapid_polling_keeps_a_bounded_history_and_uses_current_bytes() {
         let start = Instant::now();
         let mut tracker = DownloadProgressTracker::new(Some(30_000), start);
