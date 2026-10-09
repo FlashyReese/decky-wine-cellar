@@ -1,5 +1,6 @@
 import { SidebarNavigation, SidebarNavigationPage } from "@decky/ui";
 import { useEffect, useState } from "react";
+import { useTranslation } from "../i18n";
 import { v4 as uuidv4 } from "uuid";
 import { AppState, MessageType } from "../types";
 import { log } from "../utils/logger";
@@ -11,6 +12,7 @@ import FlavorTab from "./flavorTab";
 import ManagerTab from "./manager";
 
 export default function ManagePage() {
+  const { t } = useTranslation();
   const [appState, setAppState] = useState<AppState | undefined>();
   const [socket, setSocket] = useState<WebSocket>();
 
@@ -95,12 +97,12 @@ export default function ManagePage() {
   const pages: (SidebarNavigationPage | "separator")[] = [];
   if (appState != null && socket != null) {
     pages.push({
-      title: "Dashboard",
+      title: t("common-dashboard"),
       content: <ManagerTab appState={appState} socket={socket} />,
       route: "/wine-cellar/dashboard",
     });
     pages.push({
-      title: "Applications",
+      title: t("common-applications"),
       content: <ApplicationsTab appState={appState} socket={socket} />,
       route: "/wine-cellar/applications",
     });
@@ -114,11 +116,10 @@ export default function ManagePage() {
     });
   } else {
     pages.push({
-      title: "Preparing...",
+      title: t("common-preparing"),
       content: (
         <div>
-          Hang tight! We&apos;re preparing your Wine Cellar experience. If this
-          takes longer than expected, the backend may have failed to start.
+          {t("common-preparingDescription")}
         </div>
       ),
       route: "/wine-cellar/preparing",
@@ -126,7 +127,7 @@ export default function ManagePage() {
   }
 
   pages.push({
-    title: "About",
+    title: t("common-about"),
     content: <About appState={appState} socket={socket} />,
     route: "/wine-cellar/about",
   });

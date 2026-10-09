@@ -1,4 +1,5 @@
 import { CompatToolInfo } from "./utils/steamUtils";
+import { LocalizedMessage } from "./i18n/core";
 
 export type GitHubRelease = {
   url: string;
@@ -74,7 +75,7 @@ export type DownloadProgress = {
 
 export type OperationInfo = {
   id: string;
-  label: string;
+  label: LocalizedMessage;
   kind: OperationKind;
   state: OperationState;
   progress: number;
@@ -142,7 +143,7 @@ export type MessageEnvelope = {
   type: MessageType;
   command?: Command;
   steam_visible_tools?: CompatToolInfo[];
-  notification?: string;
+  notification?: LocalizedMessage;
   app_state?: AppState;
   operation_state?: OperationStateSnapshot;
 };

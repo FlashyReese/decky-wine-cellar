@@ -22,6 +22,7 @@ import {
 } from "../types";
 import { cancelOperation, uninstallInstalledTool } from "../utils/backendApi";
 import { RestartSteamClient } from "../utils/steamUtils";
+import { useTranslation } from "../i18n";
 
 export default function ManagerTab({
   appState,
@@ -30,6 +31,7 @@ export default function ManagerTab({
   appState: AppState;
   socket: WebSocket;
 }) {
+  const { t, translateMessage } = useTranslation();
   const installedTools = appState.installed_tools;
 
   const operations = [
@@ -44,9 +46,9 @@ export default function ManagerTab({
   const handleViewUsedByGames = (title: string, usedByGames: string[]) => {
     showModal(
       <ConfirmModal
-        strTitle={"Steam applications using " + title}
+        strTitle={t("tools-usedByTitle", { tool: title })}
         strDescription={usedByGames.join(", ")}
-        strOKButtonText={"OK"}
+        strOKButtonText={t("common-ok")}
       />,
     );
   };
@@ -62,10 +64,10 @@ export default function ManagerTab({
   const handleRemoveInstalledToolModal = (tool: InstalledCompatibilityTool) =>
     showModal(
       <ConfirmModal
-        strTitle={"Remove " + getInstalledToolLabel(tool)}
-        strDescription={"Are you sure you want to remove this compatibility tool?"}
-        strOKButtonText={"Remove"}
-        strCancelButtonText={"Cancel"}
+        strTitle={t("tools-removeTitle", { tool: getInstalledToolLabel(tool) })}
+        strDescription={t("tools-removeConfirm")}
+        strOKButtonText={t("common-remove")}
+        strCancelButtonText={t("common-cancel")}
         onOK={() => {
           handleRemoveInstalledTool(tool);
         }}
@@ -77,18 +79,18 @@ export default function ManagerTab({
       {currentTransfer != null && (
         <DialogControlsSection>
           <DialogControlsSectionHeader>
-            Current Operation
+            {t("tools-currentOperation")}
           </DialogControlsSectionHeader>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
-              {currentTransfer.label}
+              {translateMessage(currentTransfer.label)}
             </span>
             <DialogButton
               style={{ width: "auto", minWidth: "100px", flexShrink: 0 }}
               disabled={currentTransfer.state === OperationState.Cancelling}
               onClick={() => cancelOperation(socket, currentTransfer.id)}
             >
-              Cancel
+              {t("common-cancel")}
             </DialogButton>
           </div>
           <OperationProgress operation={currentTransfer} />
@@ -96,9 +98,9 @@ export default function ManagerTab({
       )}
 
       <DialogControlsSection>
-        <DialogControlsSectionHeader>Installed</DialogControlsSectionHeader>
+        <DialogControlsSectionHeader>{t("common-installed")}</DialogControlsSectionHeader>
         {installedTools.length === 0 ? (
-          <div>No installed compatibility tools are available.</div>
+          <div>{t("tools-empty")}</div>
         ) : (
           <ul style={{ listStyleType: "none", margin: 0, padding: 0 }}>
             {installedTools.map((installedTool) => {
@@ -120,9 +122,9 @@ export default function ManagerTab({
                 >
                   <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
                     {getInstalledToolLabel(installedTool)}
-                    {installedTool.requires_restart && " (Requires Restart)"}
+                    {installedTool.requires_restart && t("tools-requiresRestart")}
                     {installedTool.used_by_games.length !== 0 &&
-                      " (Used By Games)"}
+                      t("tools-usedByGames")}
                   </span>
                   <Focusable
                     style={{
@@ -134,7 +136,7 @@ export default function ManagerTab({
                     }}
                   >
                     <DialogButton
-                      aria-label={`Actions for installed tool ${getInstalledToolLabel(installedTool)}`}
+                      aria-label={t("tools-actionsFor", { tool: getInstalledToolLabel(installedTool) })}
                       style={{
                         height: "40px",
                         width: "40px",
@@ -143,7 +145,7 @@ export default function ManagerTab({
                       }}
                       onClick={(event: MouseEvent) =>
                         showContextMenu(
-                          <Menu label="Installed Tool Actions">
+                          <Menu label={t("tools-installedActions")}>
 
                             <MenuItem
                               disabled={installedToolBusy}
@@ -151,7 +153,7 @@ export default function ManagerTab({
                                 handleRemoveInstalledToolModal(installedTool);
                               }}
                             >
-                              Remove
+                              {t("common-remove")}
                             </MenuItem>
                             {installedTool.used_by_games.length !== 0 && (
                               <MenuItem
@@ -162,7 +164,7 @@ export default function ManagerTab({
                                   );
                                 }}
                               >
-                                View Used By Games
+                                {t("tools-viewUsedBy")}
                               </MenuItem>
                             )}
                             {installedTool.github_release != null && (
@@ -173,7 +175,7 @@ export default function ManagerTab({
                                   }
                                 }}
                               >
-                                View Change Log
+                                {t("tools-viewChangelog")}
                               </MenuItem>
                             )}
                             {installedTool.requires_restart && (
@@ -182,7 +184,7 @@ export default function ManagerTab({
                                   RestartSteamClient();
                                 }}
                               >
-                                Restart Steam
+                                {t("tools-restartSteam")}
                               </MenuItem>
                             )}
                           </Menu>,

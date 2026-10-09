@@ -27,6 +27,7 @@ import {
   uninstallInstalledTool,
 } from "../utils/backendApi";
 import { RestartSteamClient } from "../utils/steamUtils";
+import { useTranslation } from "../i18n";
 
 export default function FlavorTab({
   appState,
@@ -37,6 +38,7 @@ export default function FlavorTab({
   flavor: Flavor;
   socket: WebSocket;
 }) {
+  const { t, translateMessage } = useTranslation();
   const installedToolsForFlavor = appState.installed_tools.filter(
     (tool) => tool.flavor === flavor.flavor,
   );
@@ -48,9 +50,9 @@ export default function FlavorTab({
   const handleViewUsedByGames = (tool: InstalledCompatibilityTool) => {
     showModal(
       <ConfirmModal
-        strTitle={"Steam applications using " + getToolLabel(tool)}
+        strTitle={t("tools-usedByTitle", { tool: getToolLabel(tool) })}
         strDescription={tool.used_by_games.join(", ")}
-        strOKButtonText={"OK"}
+        strOKButtonText={t("common-ok")}
       />,
     );
   };
@@ -62,10 +64,10 @@ export default function FlavorTab({
   const handleUninstallToolModal = (tool: InstalledCompatibilityTool) =>
     showModal(
       <ConfirmModal
-        strTitle={"Remove " + getToolLabel(tool)}
-        strDescription={"Are you sure you want to remove this compatibility tool?"}
-        strOKButtonText={"Remove"}
-        strCancelButtonText={"Cancel"}
+        strTitle={t("tools-removeTitle", { tool: getToolLabel(tool) })}
+        strDescription={t("tools-removeConfirm")}
+        strOKButtonText={t("common-remove")}
+        strCancelButtonText={t("common-cancel")}
         onOK={() => {
           uninstallInstalledTool(socket, tool.id);
         }}
@@ -76,7 +78,7 @@ export default function FlavorTab({
     <DialogBody>
       {installedToolsForFlavor.length !== 0 && (
         <DialogControlsSection>
-          <DialogControlsSectionHeader>Installed</DialogControlsSectionHeader>
+          <DialogControlsSectionHeader>{t("common-installed")}</DialogControlsSectionHeader>
           <ul style={{ listStyleType: "none", margin: 0, padding: 0 }}>
             {installedToolsForFlavor.map((tool) => {
               const toolBusy = operations.some(
@@ -97,8 +99,8 @@ export default function FlavorTab({
                 >
                   <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
                     {getToolLabel(tool)}
-                    {tool.requires_restart && " (Requires Restart)"}
-                    {tool.used_by_games.length !== 0 && " (Used By Games)"}
+                    {tool.requires_restart && t("tools-requiresRestart")}
+                    {tool.used_by_games.length !== 0 && t("tools-usedByGames")}
                   </span>
                   <Focusable
                     style={{
@@ -110,7 +112,7 @@ export default function FlavorTab({
                     }}
                   >
                     <DialogButton
-                      aria-label={`Actions for installed tool ${getToolLabel(tool)}`}
+                      aria-label={t("tools-actionsFor", { tool: getToolLabel(tool) })}
                       style={{
                         height: "40px",
                         width: "40px",
@@ -119,14 +121,14 @@ export default function FlavorTab({
                       }}
                       onClick={(event: MouseEvent) =>
                         showContextMenu(
-                          <Menu label="Installed Tool Actions">
+                          <Menu label={t("tools-installedActions")}>
                             <MenuItem
                               disabled={toolBusy}
                               onClick={() => {
                                 handleUninstallToolModal(tool);
                               }}
                             >
-                              Remove
+                              {t("common-remove")}
                             </MenuItem>
                             {tool.used_by_games.length !== 0 && (
                               <MenuItem
@@ -134,7 +136,7 @@ export default function FlavorTab({
                                   handleViewUsedByGames(tool);
                                 }}
                               >
-                                View Used By Games
+                                {t("tools-viewUsedBy")}
                               </MenuItem>
                             )}
                             {tool.github_release != null && (
@@ -151,7 +153,7 @@ export default function FlavorTab({
                                   }
                                 }}
                               >
-                                View Change Log
+                                {t("tools-viewChangelog")}
                               </MenuItem>
                             )}
                             {tool.requires_restart && (
@@ -160,7 +162,7 @@ export default function FlavorTab({
                                   RestartSteamClient();
                                 }}
                               >
-                                Restart Steam
+                                {t("tools-restartSteam")}
                               </MenuItem>
                             )}
                           </Menu>,
@@ -180,7 +182,7 @@ export default function FlavorTab({
       )}
 
       <DialogControlsSection>
-        <DialogControlsSectionHeader>Catalog</DialogControlsSectionHeader>
+        <DialogControlsSectionHeader>{t("common-catalog")}</DialogControlsSectionHeader>
         <ul style={{ listStyleType: "none", margin: 0, padding: 0 }}>
           {flavor.releases.map((release) => {
             const isInstalled = appState.installed_tools.some(
@@ -213,10 +215,10 @@ export default function FlavorTab({
                 >
                   <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                     {release.release.tag_name}
-                    {isInstalled && " (Installed)"}
+                    {isInstalled && t("tools-installedMarker")}
                     {releaseOperations.some(
                       (operation) => operation.state === OperationState.Pending,
-                    ) && " (Queued)"}
+                    ) && t("tools-queuedMarker")}
                   </span>
                   <Focusable
                     style={{
@@ -237,14 +239,14 @@ export default function FlavorTab({
                       }}
                       onClick={(event: MouseEvent) =>
                         showContextMenu(
-                          <Menu label="Catalog Release Actions">
+                          <Menu label={t("tools-catalogActions")}>
                             <MenuItem
                               disabled={isInstalled || installBusy}
                               onClick={() => {
                                 installCatalogRelease(socket, release.id);
                               }}
                             >
-                              Install
+                              {t("common-install")}
                             </MenuItem>
 
                             {releaseOperations.map((operation) => (
@@ -257,7 +259,9 @@ export default function FlavorTab({
                                   cancelOperation(socket, operation.id);
                                 }}
                               >
-                                Cancel {operation.label}
+                                {t("tools-cancelOperation", {
+                                  operation: translateMessage(operation.label),
+                                })}
                               </MenuItem>
                             ))}
                             <MenuItem
@@ -265,7 +269,7 @@ export default function FlavorTab({
                                 handleViewChangeLog(release);
                               }}
                             >
-                              View Change Log
+                              {t("tools-viewChangelog")}
                             </MenuItem>
                           </Menu>,
                           event.currentTarget ?? window,

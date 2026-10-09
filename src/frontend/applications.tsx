@@ -22,6 +22,13 @@ import { FaChevronLeft, FaChevronRight } from "react-icons/fa";
 import { AppState } from "../types";
 import { requestState } from "../utils/backendApi";
 import {
+  DisplayMessage,
+  LocalizedMessage,
+  errorMessage,
+  message,
+  useTranslation,
+} from "../i18n";
+import {
   CompatToolInfo,
   GetAvailableCompatTools,
   GetManagedApplications,
@@ -30,11 +37,6 @@ import {
 } from "../utils/steamUtils";
 
 const APPLICATIONS_PER_PAGE = 40;
-
-const STEAM_DEFAULT_OPTION: SingleDropdownOption = {
-  data: "",
-  label: "Steam default",
-};
 
 interface ApplicationsTabProps {
   appState: AppState;
@@ -49,20 +51,17 @@ interface OptimisticAssignment {
 type ToolOptionsState =
   | { status: "loading" }
   | { status: "ready"; tools: CompatToolInfo[] }
-  | { status: "error"; message: string };
+  | { status: "error"; message: DisplayMessage };
 
 function applicationKey(application: ManagedSteamApplication): string {
   return `${application.isShortcut ? "shortcut" : "steam"}:${application.appId}`;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function dropdownOptions(
   tools: CompatToolInfo[],
   assignedToolName: string,
   assignedToolDisplayName: string,
+  steamDefaultLabel: string,
 ): SingleDropdownOption[] {
   const seenToolNames = new Set<string>();
   const options = tools.flatMap((tool) => {
@@ -86,7 +85,7 @@ function dropdownOptions(
     });
   }
 
-  return [STEAM_DEFAULT_OPTION, ...options];
+  return [{ data: "", label: steamDefaultLabel }, ...options];
 }
 
 function ApplicationIcon({
@@ -146,6 +145,7 @@ export default function ApplicationsTab({
   appState,
   socket,
 }: ApplicationsTabProps) {
+  const { t, translateMessage } = useTranslation();
   const [applications, setApplications] = useState<ManagedSteamApplication[]>(
     [],
   );
@@ -155,10 +155,10 @@ export default function ApplicationsTab({
   const restoreListFocus = useRef(false);
   const [page, setPage] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string>();
-  const [inventoryWarning, setInventoryWarning] = useState<string>();
+  const [loadError, setLoadError] = useState<DisplayMessage>();
+  const [inventoryWarning, setInventoryWarning] = useState<LocalizedMessage>();
   const [assignmentErrors, setAssignmentErrors] = useState<
-    Record<string, string>
+    Record<string, DisplayMessage>
   >({});
   const [optimisticAssignments, setOptimisticAssignments] = useState<
     Record<string, OptimisticAssignment>
@@ -326,10 +326,12 @@ export default function ApplicationsTab({
         String(application.appId),
         assignedToolName,
         assignedToolDisplayName,
-        application.isShortcut ? "non-steam shortcut" : "steam game",
+        application.isShortcut
+          ? t("applications-shortcut")
+          : t("applications-steamGame"),
       ].some((value) => value.toLocaleLowerCase().includes(normalizedSearch));
     });
-  }, [applications, assignmentFor, search, toolDisplayNames, toolOptions]);
+  }, [applications, assignmentFor, search, toolDisplayNames, toolOptions, t]);
 
   const pageCount = Math.max(
     1,
@@ -511,7 +513,9 @@ export default function ApplicationsTab({
         });
         setAssignmentErrors((current) => ({
           ...current,
-          [key]: `Could not change the compatibility tool: ${errorMessage(error)}`,
+          [key]: message("applications-assignmentFailed", {
+            error: errorMessage(error),
+          }),
         }));
         return;
       }
@@ -566,8 +570,7 @@ export default function ApplicationsTab({
       <DialogControlsSection>
         {compatibilityMappingsStale && (
           <div role="alert" style={{ color: "#f5c56b", paddingBottom: "10px" }}>
-            Saved compatibility assignments could not be refreshed. Changes are
-            disabled until Refresh succeeds.
+            {t("applications-staleMappings")}
           </div>
         )}
         <Focusable
@@ -583,15 +586,15 @@ export default function ApplicationsTab({
             style={{ flex: 1, minWidth: 0 }}
           >
             <TextField
-              aria-label="Search installed Steam games and non-Steam shortcuts"
-              {...{ placeholder: "Search games, shortcuts, or tools" }}
+              aria-label={t("applications-searchLabel")}
+              {...{ placeholder: t("applications-searchPlaceholder") }}
               value={search}
               bShowClearAction
               onChange={(event) => setSearch(event.currentTarget.value)}
             />
           </div>
           <DialogButton
-            aria-label="Refresh installed applications and compatibility assignments"
+            aria-label={t("applications-refreshLabel")}
             disabled={isLoading}
             onClick={refresh}
             style={{
@@ -600,12 +603,12 @@ export default function ApplicationsTab({
               flex: "0 0 auto",
             }}
           >
-            {isLoading ? "Refreshing…" : "Refresh"}
+            {isLoading ? t("common-refreshing") : t("common-refresh")}
           </DialogButton>
         </Focusable>
         {isLoading && applications.length === 0 && (
           <div role="status" aria-live="polite">
-            Loading installed applications…
+            {t("applications-loading")}
           </div>
         )}
 
@@ -615,23 +618,25 @@ export default function ApplicationsTab({
             style={{ color: "#ff9f9f", paddingBottom: "10px" }}
           >
             {applications.length === 0
-              ? `Could not load applications: ${loadError}`
-              : `Could not refresh applications: ${loadError}. Previously loaded results are still shown.`}
+              ? t("applications-loadFailed", { error: loadError })
+              : t("applications-refreshFailed", { error: loadError })}
           </div>
         )}
 
         {inventoryWarning != null && (
           <div role="status" style={{ color: "#f5c56b", paddingBottom: "10px" }}>
-            {inventoryWarning}
+            {translateMessage(inventoryWarning)}
           </div>
         )}
 
         {!isLoading && loadError == null && applications.length === 0 && (
-          <div>No installed Steam games or non-Steam shortcuts were found.</div>
+          <div>{t("applications-empty")}</div>
         )}
 
         {applications.length > 0 && filteredApplications.length === 0 && (
-          <div role="status">No applications match “{search.trim()}”.</div>
+          <div role="status">
+            {t("applications-noMatches", { search: search.trim() })}
+          </div>
         )}
 
         {pageApplications.length > 0 && (
@@ -652,15 +657,19 @@ export default function ApplicationsTab({
                 aria-live="polite"
                 style={{ opacity: 0.75, fontSize: "14px" }}
               >
-                {shownStart}–{shownEnd} of {filteredApplications.length}
+                {t("applications-range", {
+                  start: shownStart,
+                  end: shownEnd,
+                  count: filteredApplications.length,
+                })}
               </span>
               {pageCount > 1 && (
                 <div
                   style={{ display: "flex", alignItems: "center", gap: "8px" }}
                 >
                   <DialogButton
-                    aria-label="Previous application page"
-                    onOKActionDescription="Previous page"
+                    aria-label={t("applications-previousLabel")}
+                    onOKActionDescription={t("applications-previous")}
                     disabled={!canGoToPreviousPage}
                     onClick={previousPage}
                     style={{
@@ -673,11 +682,11 @@ export default function ApplicationsTab({
                     <FaChevronLeft aria-hidden="true" />
                   </DialogButton>
                   <span aria-live="polite" style={{ fontSize: "14px" }}>
-                    Page {page + 1} of {pageCount}
+                    {t("applications-page", { page: page + 1, count: pageCount })}
                   </span>
                   <DialogButton
-                    aria-label="Next application page"
-                    onOKActionDescription="Next page"
+                    aria-label={t("applications-nextLabel")}
+                    onOKActionDescription={t("applications-next")}
                     disabled={!canGoToNextPage}
                     onClick={nextPage}
                     style={{
@@ -694,7 +703,7 @@ export default function ApplicationsTab({
             </Focusable>
             <ul
               ref={applicationListRef}
-              aria-label="Installed Steam games and non-Steam shortcuts"
+              aria-label={t("applications-listLabel")}
               style={{ listStyle: "none", margin: 0, padding: 0 }}
             >
               {pageApplications.map((application) => {
@@ -706,7 +715,7 @@ export default function ApplicationsTab({
                   optionsState?.status === "ready" ? optionsState.tools : [];
                 const assignedToolDisplayName =
                   assignedToolName === ""
-                    ? "Steam default"
+                    ? t("applications-steamDefault")
                     : availableTools.find(
                         (tool) => tool.strToolName === assignedToolName,
                       )?.strDisplayName ||
@@ -719,14 +728,17 @@ export default function ApplicationsTab({
                       label={
                         <div style={{ minWidth: 0 }}>
                           <div
-                            title={`${application.name || `App ${application.appId}`} · App ID ${application.appId}`}
+                            title={t("applications-appTitle", {
+                              name: application.name || t("applications-appName", { id: String(application.appId) }),
+                              id: String(application.appId),
+                            })}
                             style={{
                               overflow: "hidden",
                               textOverflow: "ellipsis",
                               whiteSpace: "nowrap",
                             }}
                           >
-                            {application.name || `App ${application.appId}`}
+                            {application.name || t("applications-appName", { id: String(application.appId) })}
                           </div>
                           <div
                             style={{
@@ -736,8 +748,8 @@ export default function ApplicationsTab({
                             }}
                           >
                             {application.isShortcut
-                              ? "Non-Steam shortcut"
-                              : "Steam game"}
+                              ? t("applications-shortcut")
+                              : t("applications-steamGame")}
                           </div>
                         </div>
                       }
@@ -748,20 +760,19 @@ export default function ApplicationsTab({
                           assignmentError != null) && (
                           <div>
                             {optionsState?.status === "loading" && (
-                              <div role="status">Loading compatible tools…</div>
+                              <div role="status">{t("applications-loadingTools")}</div>
                             )}
                             {optionsState?.status === "error" && (
                               <div role="alert" style={{ color: "#ff9f9f" }}>
-                                Could not load compatible tools: {optionsState.message}.
-                                Select the menu again to retry.
+                                {t("applications-toolsFailed", { error: optionsState.message })}
                               </div>
                             )}
                             {optimisticAssignments[key] != null && (
-                              <div role="status">Saving compatibility override…</div>
+                              <div role="status">{t("applications-saving")}</div>
                             )}
                             {assignmentError != null && (
                               <div role="alert" style={{ color: "#ff9f9f" }}>
-                                {assignmentError}
+                                {translateMessage(assignmentError)}
                               </div>
                             )}
                           </div>
@@ -788,14 +799,20 @@ export default function ApplicationsTab({
                             availableTools,
                             assignedToolName,
                             assignedToolDisplayName,
+                            t("applications-steamDefault"),
                           )}
                           selectedOption={assignedToolName}
                           disabled={compatibilityMappingsStale}
-                          menuLabel={`Compatibility tool for ${application.name || `App ${application.appId}`}`}
+                          menuLabel={t("applications-toolFor", {
+                            name: application.name || t("applications-appName", { id: String(application.appId) }),
+                          })}
                           focusable
                           renderButtonValue={() => (
                             <span
-                              aria-label={`Compatibility tool for ${application.name || `App ${application.appId}`}: ${assignedToolDisplayName}`}
+                              aria-label={t("applications-selectedTool", {
+                                name: application.name || t("applications-appName", { id: String(application.appId) }),
+                                tool: assignedToolDisplayName,
+                              })}
                               title={assignedToolDisplayName}
                               style={{
                                 display: "block",
@@ -831,11 +848,11 @@ export default function ApplicationsTab({
       flow-children="column"
       style={{ boxShadow: "none" }}
       onOptionsButton={focusSearch}
-      onOptionsActionDescription="Search"
+      onOptionsActionDescription={t("applications-search")}
       onButtonDown={handlePageButton}
       actionDescriptionMap={{
-        [GamepadButton.BUMPER_LEFT]: canGoToPreviousPage ? "Previous page" : undefined,
-        [GamepadButton.BUMPER_RIGHT]: canGoToNextPage ? "Next page" : undefined,
+        [GamepadButton.BUMPER_LEFT]: canGoToPreviousPage ? t("applications-previous") : undefined,
+        [GamepadButton.BUMPER_RIGHT]: canGoToNextPage ? t("applications-next") : undefined,
       }}
     >
       {content}

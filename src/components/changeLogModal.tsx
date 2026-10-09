@@ -1,6 +1,7 @@
 import { Markdown } from "./markdown";
 import { GitHubRelease } from "../types";
 import { Focusable, ScrollPanelGroup } from "@decky/ui";
+import { useTranslation } from "../i18n";
 
 // Decky's public type only declares `children`, but Steam's component also
 // forwards the normal Focusable/div props used here for sizing and autofocus.
@@ -13,6 +14,7 @@ function ChangeLogModal({
   release: GitHubRelease;
   closeModal?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Focusable
       onCancelButton={closeModal}
@@ -42,7 +44,7 @@ function ChangeLogModal({
           {release.body ? (
             <Markdown onDismiss={closeModal}>{release.body}</Markdown>
           ) : (
-            "no patch notes for this version"
+            t("changelog-empty")
           )}
         </div>
       </ChangelogScrollPanel>

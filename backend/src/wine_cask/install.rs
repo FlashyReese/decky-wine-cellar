@@ -1,4 +1,5 @@
 use crate::github_util::{Asset, Release};
+use crate::i18n::{message, LocalizedMessage};
 use crate::wine_cask::app::{OperationState, WineCask};
 use crate::wine_cask::download_progress::DownloadProgressTracker;
 use crate::wine_cask::flavors::{CatalogRelease, CompatibilityToolFlavor};
@@ -42,7 +43,7 @@ impl WineCask {
         peer_map: &PeerMap,
     ) {
         let Some(catalog_release) = self.get_catalog_release(&release_id).await else {
-            self.broadcast_notification(peer_map, "Requested release is no longer available")
+            self.broadcast_notification(peer_map, message("install-releaseUnavailable", &[]))
                 .await;
             return;
         };
@@ -52,7 +53,7 @@ impl WineCask {
         else {
             self.broadcast_notification(
                 peer_map,
-                "Error: No supported compressed archive found for this release",
+                message("install-noArchive", &[]),
             )
             .await;
             return;
@@ -61,7 +62,7 @@ impl WineCask {
         if download_plan.expected_size > MAX_ARCHIVE_SIZE_BYTES {
             self.broadcast_notification(
                 peer_map,
-                "Error: Compatibility tool archive is larger than the supported limit",
+                message("install-archiveTooLarge", &[]),
             )
             .await;
             return;
@@ -80,7 +81,7 @@ impl WineCask {
             None => {
                 self.broadcast_notification(
                     peer_map,
-                    "Failed to prepare temporary install directory",
+                    message("install-prepareDirectoryFailed", &[]),
                 )
                 .await;
                 return;
@@ -93,7 +94,7 @@ impl WineCask {
                 cleanup_temp_directory(&temp_dir);
                 self.broadcast_notification(
                     peer_map,
-                    &format!("Failed to create temporary archive file: {}", err),
+                    message("install-createArchiveFailed", &[("error", &err.to_string())]),
                 )
                 .await;
                 return;
@@ -107,7 +108,7 @@ impl WineCask {
                 cleanup_temp_directory(&temp_dir);
                 self.broadcast_notification(
                     peer_map,
-                    "Connection error: Unable to prepare compatibility tool download",
+                    message("install-prepareDownloadFailed", &[]),
                 )
                 .await;
                 return;
@@ -120,7 +121,7 @@ impl WineCask {
                 cleanup_temp_directory(&temp_dir);
                 self.broadcast_notification(
                     peer_map,
-                    "Connection error: Unable to start compatibility tool download",
+                    message("install-startDownloadFailed", &[]),
                 )
                 .await;
                 return;
@@ -130,7 +131,7 @@ impl WineCask {
         if !response.status().is_success() {
             error!("Download failed with status {}", response.status());
             cleanup_temp_directory(&temp_dir);
-            self.broadcast_notification(peer_map, "Connection error: Download failed")
+            self.broadcast_notification(peer_map, message("install-downloadFailed", &[]))
                 .await;
             return;
         }
@@ -146,7 +147,7 @@ impl WineCask {
             cleanup_temp_directory(&temp_dir);
             self.broadcast_notification(
                 peer_map,
-                "Error: Compatibility tool archive is larger than the supported limit",
+                message("install-archiveTooLarge", &[]),
             )
             .await;
             return;
@@ -165,7 +166,7 @@ impl WineCask {
         loop {
             if self.current_operation_is_cancelling().await {
                 cleanup_temp_directory(&temp_dir);
-                self.broadcast_notification(peer_map, "Installation cancelled")
+                self.broadcast_notification(peer_map, message("install-cancelled", &[]))
                     .await;
                 return;
             }
@@ -192,7 +193,7 @@ impl WineCask {
                 Err(err) => {
                     error!("Download stream failed: {}", err);
                     cleanup_temp_directory(&temp_dir);
-                    self.broadcast_notification(peer_map, "Connection error: Download interrupted")
+                    self.broadcast_notification(peer_map, message("install-downloadInterrupted", &[]))
                         .await;
                     return;
                 }
@@ -203,7 +204,7 @@ impl WineCask {
                 cleanup_temp_directory(&temp_dir);
                 self.broadcast_notification(
                     peer_map,
-                    "Storage error: Failed to write compatibility tool archive",
+                    message("install-writeArchiveFailed", &[]),
                 )
                 .await;
                 return;
@@ -213,7 +214,7 @@ impl WineCask {
                 cleanup_temp_directory(&temp_dir);
                 self.broadcast_notification(
                     peer_map,
-                    "Error: Compatibility tool archive is larger than the supported limit",
+                    message("install-archiveTooLarge", &[]),
                 )
                 .await;
                 return;
@@ -231,7 +232,7 @@ impl WineCask {
             cleanup_temp_directory(&temp_dir);
             self.broadcast_notification(
                 peer_map,
-                "Storage error: Failed to finalize compatibility tool archive",
+                message("install-finalizeArchiveFailed", &[]),
             )
             .await;
             return;
@@ -253,13 +254,13 @@ impl WineCask {
                 info!("{}", message);
                 self.sync_backend_state().await;
                 self.broadcast_app_state(peer_map).await;
-                self.broadcast_notification(peer_map, &message).await;
+                self.broadcast_notification(peer_map, message).await;
             }
             Err(err) => {
                 error!("Installation failed: {}", err);
                 self.sync_backend_state().await;
                 self.broadcast_app_state(peer_map).await;
-                self.broadcast_notification(peer_map, &err).await;
+                self.broadcast_notification(peer_map, err).await;
             }
         }
 
@@ -273,9 +274,9 @@ impl WineCask {
         compression_type: CompressionType,
         temp_dir: &Path,
         archive_path: &Path,
-    ) -> Result<String, String> {
+    ) -> Result<LocalizedMessage, LocalizedMessage> {
         if self.current_operation_is_cancelling().await {
-            return Err("Installation cancelled".to_string());
+            return Err(message("install-cancelled", &[]));
         }
 
         self.update_current_operation(OperationState::Extracting, 0, peer_map)
@@ -284,8 +285,9 @@ impl WineCask {
         let temp_dir_clone = temp_dir.to_path_buf();
         let archive_path_clone = archive_path.to_path_buf();
         let unpack_result = tokio::task::spawn_blocking(move || {
-            let archive_file = File::open(&archive_path_clone)
-                .map_err(|err| format!("Failed to open temporary archive: {}", err))?;
+            let archive_file = File::open(&archive_path_clone).map_err(|err| {
+                message("install-openArchiveFailed", &[("error", &err.to_string())])
+            })?;
             let archive_reader = BufReader::new(archive_file);
 
             let decompressed: Box<dyn Read> = if compression_type == CompressionType::Gzip {
@@ -293,16 +295,19 @@ impl WineCask {
             } else if compression_type == CompressionType::Xz {
                 Box::new(XzDecoder::new(archive_reader))
             } else {
-                return Err("Unsupported archive compression type".to_string());
+                return Err(message("install-unsupportedCompression", &[]));
             };
 
             safe_unpack_tar(decompressed, &temp_dir_clone)
+                .map_err(|err| message("install-failed", &[("error", &err)]))
         })
         .await
-        .map_err(|err| format!("Extraction task failed: {}", err))?;
+        .map_err(|err| {
+            message("install-extractionTaskFailed", &[("error", &err.to_string())])
+        })?;
 
         if let Err(err) = unpack_result {
-            return Err(format!("Installation failed: {}", err));
+            return Err(err);
         }
 
         if let Err(err) = std::fs::remove_file(archive_path) {
@@ -313,11 +318,11 @@ impl WineCask {
         }
 
         if self.current_operation_is_cancelling().await {
-            return Err("Installation cancelled".to_string());
+            return Err(message("install-cancelled", &[]));
         }
 
         let extracted_directory = std::fs::read_dir(temp_dir)
-            .map_err(|err| format!("Failed to read extraction directory: {}", err))?
+            .map_err(|err| message("install-readExtractionFailed", &[("error", &err.to_string())]))?
             .filter_map(Result::ok)
             .filter(|entry| {
                 entry
@@ -327,15 +332,13 @@ impl WineCask {
             })
             .map(|entry| entry.path())
             .find(|path| path.join("compatibilitytool.vdf").exists())
-            .ok_or_else(|| {
-                "Failed to find the extracted compatibility tool contents".to_string()
-            })?;
+            .ok_or_else(|| message("install-contentsNotFound", &[]))?;
 
         validate_extracted_symlinks(&extracted_directory)
-            .map_err(|err| format!("Installation failed: {}", err))?;
+            .map_err(|err| message("install-failed", &[("error", &err)]))?;
 
         if self.current_operation_is_cancelling().await {
-            return Err("Installation cancelled".to_string());
+            return Err(message("install-cancelled", &[]));
         }
 
         self.install_tool(&extracted_directory, catalog_release)
@@ -345,10 +348,10 @@ impl WineCask {
         &self,
         extracted_directory: &Path,
         catalog_release: &CatalogRelease,
-    ) -> Result<String, String> {
+    ) -> Result<LocalizedMessage, LocalizedMessage> {
         let temp_dir = extracted_directory
             .parent()
-            .ok_or_else(|| "Missing temporary extraction parent directory".to_string())?;
+            .ok_or_else(|| message("install-parentMissing", &[]))?;
         let compatibility_tools_directory =
             self.steam_util.get_steam_compatibility_tools_directory();
 
@@ -373,41 +376,38 @@ impl WineCask {
                         catalog_release.release.tag_name
                     ),
                 )
-                .map_err(|err| format!("Failed to write compatibility tool VDF: {}", err))?;
+                .map_err(|err| message("install-writeVdfFailed", &[("error", &err.to_string())]))?;
                 temp_dir.join(&new_folder_name)
             }
             CompatibilityToolFlavor::Unknown => {
-                return Err("Unsupported compatibility tool flavor".to_string())
+                return Err(message("install-unsupportedFlavor", &[]))
             }
         };
 
         if new_path != extracted_directory {
             std::fs::rename(extracted_directory, &new_path)
-                .map_err(|err| format!("Failed to prepare compatibility tool layout: {}", err))?;
+                .map_err(|err| message("install-layoutFailed", &[("error", &err.to_string())]))?;
         }
 
         let target_directory_name = new_path
             .file_name()
-            .ok_or_else(|| "Failed to resolve extracted compatibility tool name".to_string())?;
+            .ok_or_else(|| message("install-nameNotFound", &[]))?;
         let target_directory = compatibility_tools_directory.join(target_directory_name);
 
         if target_directory.exists() {
-            return Err(format!(
-                "Compatibility tool directory already exists: {}",
-                target_directory.display()
+            return Err(message(
+                "install-directoryExists",
+                &[("path", &target_directory.display().to_string())],
             ));
         }
 
         std::fs::rename(&new_path, &target_directory).map_err(|err| {
-            format!(
-                "Failed to move compatibility tool into Steam compatibilitytools.d: {}",
-                err
-            )
+            message("install-moveFailed", &[("error", &err.to_string())])
         })?;
 
-        Ok(format!(
-            "Installation completed: {}",
-            catalog_release.release.tag_name
+        Ok(message(
+            "install-completed",
+            &[("tool", &catalog_release.release.tag_name)],
         ))
     }
 

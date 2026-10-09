@@ -7,12 +7,12 @@ import {
   Focusable,
   Navigation,
 } from "@decky/ui";
-import { formatDistanceToNow, fromUnixTime } from "date-fns";
 import { HiOutlineQrCode } from "react-icons/hi2";
 import { SiDiscord, SiGithub, SiKofi } from "react-icons/si";
 import { AppState, UpdaterState } from "../types";
 import { showQrModal } from "../components/showQrModal";
 import { refreshCatalog } from "../utils/backendApi";
+import { formatRelativeTime, useTranslation } from "../i18n";
 
 export default function About({
   appState,
@@ -21,20 +21,19 @@ export default function About({
   appState: AppState | undefined;
   socket: WebSocket | undefined;
 }) {
+  const { t } = useTranslation();
   return (
     <DialogBody>
       <DialogControlsSection>
         <div>
           <p>
-            Wine Cellar is a compatibility tool manager for Steam. It can install
-            and remove tools, manage compatibility settings for your applications,
-            and show which tools the current Steam session has loaded.
+            {t("about-description")}
           </p>
         </div>
         <DialogControlsSectionHeader>Wine Cellar</DialogControlsSectionHeader>
         <SystemInformation appState={appState} socket={socket} />
         <DialogControlsSectionHeader>
-          Engage & Participate
+          {t("about-participate")}
         </DialogControlsSectionHeader>
         <ProjectInformation />
       </DialogControlsSection>
@@ -49,18 +48,17 @@ function SystemInformation({
   appState: AppState | undefined;
   socket: WebSocket | undefined;
 }) {
+  const { t, locale } = useTranslation();
   return (
     <Focusable style={{ display: "flex", flexDirection: "column" }}>
       {appState != undefined && socket != undefined && (
         <Field
-          label={"Compatibility Tools Updates"}
-          description={
-            "Last checked: " +
-            (appState.updater_last_check != null
-              ? formatDistanceToNow(fromUnixTime(appState.updater_last_check)) +
-                " ago"
-              : "Never")
-          }
+          label={t("about-updates")}
+          description={t("about-lastChecked", {
+            time: appState.updater_last_check != null
+              ? formatRelativeTime(locale, appState.updater_last_check * 1000)
+              : t("about-never"),
+          })}
           bottomSeparator={"none"}
         >
           <DialogButton
@@ -70,8 +68,8 @@ function SystemInformation({
             }}
           >
             {appState.updater_state == UpdaterState.Idle
-              ? "Check For Updates"
-              : "Checking..."}
+              ? t("about-checkUpdates")
+              : t("about-checking")}
           </DialogButton>
         </Field>
       )}
@@ -80,24 +78,25 @@ function SystemInformation({
 }
 
 function ProjectInformation() {
+  const { t } = useTranslation();
   const socialLinks = [
     {
       label: "GitHub",
       icon: <SiGithub size={20} aria-hidden="true" />,
       link: "https://github.com/FlashyReese/decky-wine-cellar",
-      buttonText: "Report an Issue",
+      buttonText: t("about-reportIssue"),
     },
     {
       label: "Discord",
       icon: <SiDiscord size={20} aria-hidden="true" />,
       link: "https://discord.gg/MPHVG6MH4e",
-      buttonText: "Join Us",
+      buttonText: t("about-join"),
     },
     {
       label: "Ko-fi",
       icon: <SiKofi size={20} aria-hidden="true" />,
       link: "https://ko-fi.com/flashyreese",
-      buttonText: "Support the Project!",
+      buttonText: t("about-support"),
     },
   ];
 
@@ -138,7 +137,7 @@ function ProjectInformation() {
               {linkInfo.buttonText}
             </DialogButton>
             <DialogButton
-              aria-label={`Show ${linkInfo.label} QR code`}
+              aria-label={t("about-qrCode", { name: linkInfo.label })}
               onClick={() => {
                 showQrModal(linkInfo.link);
               }}

@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { MessageType } from "../types";
 import { parseBackendMessage } from "./backendMessages";
 import { error, log } from "./logger";
+import { translateMessage } from "../i18n";
 
 let shouldReconnect = true;
 let socket: WebSocket | null = null;
@@ -33,17 +34,16 @@ export const setupToasts = (): void => {
 
       if (
         response.type === MessageType.Notification &&
-        response.notification != null &&
-        response.notification !== ""
+        response.notification != null
       ) {
         const toastData: ToastData = {
           title: "Wine Cellar",
-          body: response.notification,
+          body: translateMessage(response.notification),
           showToast: true,
         };
 
         toaster.toast(toastData);
-        log("Received backend notification: " + response.notification);
+        log("Received backend notification:", response.notification);
       }
     };
 

@@ -1,3 +1,4 @@
+use crate::i18n::{message, LocalizedMessage};
 use crate::steam_util::SteamUtil;
 use crate::wine_cask::download_progress::DownloadProgress;
 use crate::wine_cask::flavors::{
@@ -74,7 +75,7 @@ pub struct OperationStateSnapshot {
 pub struct MessageEnvelope {
     pub r#type: MessageType,
     pub command: Option<Command>,
-    pub notification: Option<String>,
+    pub notification: Option<LocalizedMessage>,
     pub steam_visible_tools: Option<Vec<SteamClientCompatToolInfo>>,
     pub app_state: Option<AppState>,
     pub operation_state: Option<OperationStateSnapshot>,
@@ -113,7 +114,7 @@ pub enum OperationState {
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct OperationInfo {
     pub id: String,
-    pub label: String,
+    pub label: LocalizedMessage,
     pub kind: OperationKind,
     pub state: OperationState,
     pub progress: u8,
@@ -195,19 +196,22 @@ impl WineCask {
         peer_map: &PeerMap,
     ) {
         let Some(catalog_release) = self.get_catalog_release(&release_id).await else {
-            self.broadcast_notification(peer_map, "Unknown release requested")
+            self.broadcast_notification(peer_map, message("notification-unknownRelease", &[]))
                 .await;
             return;
         };
 
-        let label = format!("Install {}", catalog_release.release.tag_name);
+        let label = message(
+            "operation-install",
+            &[("tool", &catalog_release.release.tag_name)],
+        );
 
         let mut app_state = self.app_state.lock().await;
         if app_state.installed_tools.iter().any(|tool| {
             tool.catalog_release_id.as_deref() == Some(catalog_release.id.as_str())
         }) {
             drop(app_state);
-            self.broadcast_notification(peer_map, "That release is already installed")
+            self.broadcast_notification(peer_map, message("notification-alreadyInstalled", &[]))
                 .await;
             return;
         }
@@ -227,7 +231,7 @@ impl WineCask {
                 .any(|queued| operation_conflicts(&queued.operation))
         {
             drop(app_state);
-            self.broadcast_notification(peer_map, "That release is already queued or installing")
+            self.broadcast_notification(peer_map, message("notification-alreadyQueued", &[]))
                 .await;
             return;
         }
@@ -263,12 +267,12 @@ impl WineCask {
         peer_map: &PeerMap,
     ) {
         let Some(installed_tool) = self.get_installed_tool(&installed_tool_id).await else {
-            self.broadcast_notification(peer_map, "Unknown installed tool requested")
+            self.broadcast_notification(peer_map, message("notification-unknownInstalledTool", &[]))
                 .await;
             return;
         };
 
-        let label = installed_tool.display_name.clone();
+        let label = message("operation-remove", &[("tool", &installed_tool.display_name)]);
 
         let mut app_state = self.app_state.lock().await;
         if app_state
@@ -283,7 +287,7 @@ impl WineCask {
             drop(app_state);
             self.broadcast_notification(
                 peer_map,
-                "That compatibility tool already has an active or queued operation",
+                message("notification-toolBusy", &[]),
             )
             .await;
             return;
@@ -292,7 +296,7 @@ impl WineCask {
             command: Command::UninstallInstalledTool { installed_tool_id },
             operation: OperationInfo {
                 id: operation_id(),
-                label: format!("Remove {}", label),
+                label,
                 kind: OperationKind::Uninstall,
                 state: OperationState::Pending,
                 progress: 0,
@@ -328,7 +332,7 @@ impl WineCask {
                 .collect();
             drop(app_state);
             self.broadcast_operation_state(peer_map).await;
-            self.broadcast_notification(peer_map, "Cancelled queued operation")
+            self.broadcast_notification(peer_map, message("notification-cancelledQueued", &[]))
                 .await;
             return;
         }
@@ -340,7 +344,7 @@ impl WineCask {
                     operation.download = None;
                     drop(app_state);
                     self.broadcast_operation_state(peer_map).await;
-                    self.broadcast_notification(peer_map, "Cancelling install")
+                    self.broadcast_notification(peer_map, message("notification-cancellingInstall", &[]))
                         .await;
                     return;
                 }
@@ -348,7 +352,7 @@ impl WineCask {
                 drop(app_state);
                 self.broadcast_notification(
                     peer_map,
-                    "Only active installs can be cancelled once they start",
+                    message("notification-onlyInstallsCancellable", &[]),
                 )
                 .await;
                 return;
@@ -356,7 +360,7 @@ impl WineCask {
         }
 
         drop(app_state);
-        self.broadcast_notification(peer_map, "Operation not found")
+        self.broadcast_notification(peer_map, message("notification-operationNotFound", &[]))
             .await;
     }
 
@@ -403,11 +407,11 @@ impl WineCask {
         self.broadcast_message(peer_map, &response_new).await;
     }
 
-    pub async fn broadcast_notification(&self, peer_map: &PeerMap, message: &str) {
+    pub async fn broadcast_notification(&self, peer_map: &PeerMap, message: LocalizedMessage) {
         let response_new = MessageEnvelope {
             r#type: MessageType::Notification,
             command: None,
-            notification: Some(message.to_string()),
+            notification: Some(message),
             steam_visible_tools: None,
             app_state: None,
             operation_state: None,
@@ -778,7 +782,7 @@ mod tests {
     fn operation(state: OperationState, progress: u8) -> OperationInfo {
         OperationInfo {
             id: "operation-1".to_string(),
-            label: "Install GE-Proton".to_string(),
+            label: message("operation-install", &[("tool", "GE-Proton")]),
             kind: OperationKind::Install,
             state,
             progress,

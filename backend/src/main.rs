@@ -1,8 +1,10 @@
 mod github_util;
+mod i18n;
 mod multilogger;
 mod steam_util;
 mod wine_cask;
 
+use crate::i18n::message;
 use crate::multilogger::MultiLogger;
 use crate::steam_util::SteamUtil;
 use crate::wine_cask::app::{
@@ -227,7 +229,7 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
         Err(err) => {
             warn!("Failed to parse websocket request: {}", err);
             wine_cask
-                .broadcast_notification(peer_map, "Error: Invalid request payload")
+                .broadcast_notification(peer_map, message("notification-invalidRequest", &[]))
                 .await;
             return;
         }
@@ -247,7 +249,7 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
                 wine_cask
                     .broadcast_notification(
                         peer_map,
-                        "Error: Steam tool observation payload missing",
+                        message("notification-missingSteamTools", &[]),
                     )
                     .await;
             }
@@ -276,7 +278,7 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
                 wine_cask
                     .broadcast_notification(
                         peer_map,
-                        "Error: Command request missing command payload",
+                        message("notification-missingCommand", &[]),
                     )
                     .await;
             }

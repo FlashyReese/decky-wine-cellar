@@ -1,3 +1,6 @@
+import { locales, LocalizedError, LocalizedMessage, message } from "../i18n/core";
+import { getLocale } from "../i18n/locale";
+
 /**
  * Represents information about a compatibility tool.
  */
@@ -74,7 +77,7 @@ export type ManagedSteamApplication = {
 
 export type ManagedApplicationInventory = {
   applications: ManagedSteamApplication[];
-  warning?: string;
+  warning?: LocalizedMessage;
 };
 
 type ManagedAppOverview = {
@@ -110,7 +113,7 @@ function isValidSteamAppId(appId: number): boolean {
 
 function assertValidSteamAppId(appId: number): void {
   if (!isValidSteamAppId(appId)) {
-    throw new RangeError(`Invalid Steam application ID: ${String(appId)}`);
+    throw new LocalizedError("errors-invalidAppId", { id: String(appId) });
   }
 }
 
@@ -185,7 +188,7 @@ export async function GetAvailableCompatTools(
       SteamClient.Apps.GetAvailableCompatTools(appId),
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(
-          () => reject(new Error("Steam did not return compatible tools in time.")),
+          () => reject(new LocalizedError("errors-compatToolsTimeout")),
           COMPAT_TOOLS_TIMEOUT_MS,
         );
       }),
@@ -330,7 +333,7 @@ export async function GetManagedApplications(): Promise<
     },
   );
 
-  const collator = new Intl.Collator(undefined, {
+  const collator = new Intl.Collator(locales[getLocale()].tag, {
     numeric: true,
     sensitivity: "base",
   });
@@ -343,7 +346,7 @@ export async function GetManagedApplications(): Promise<
   return {
     applications: sortedApplications,
     warning: isPartialInventory
-      ? "Steam's shortcut catalog is still loading. Installed Steam titles are shown; refresh to include non-Steam shortcuts."
+      ? message("applications-partialInventory")
       : undefined,
   };
 }
