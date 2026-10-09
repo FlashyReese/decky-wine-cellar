@@ -1,4 +1,4 @@
-mod github_util;
+mod release_util;
 mod i18n;
 mod multilogger;
 mod steam_util;

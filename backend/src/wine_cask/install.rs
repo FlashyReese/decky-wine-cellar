@@ -1,4 +1,4 @@
-use crate::github_util::{Asset, Release};
+use crate::release_util::{Asset, Release};
 use crate::i18n::{message, LocalizedMessage};
 use crate::wine_cask::app::{OperationState, WineCask};
 use crate::wine_cask::download_progress::DownloadProgressTracker;
@@ -796,6 +796,22 @@ mod tests {
 
         assert_eq!(plan.url, "https://example.com/x86_64_v3");
         assert_eq!(plan.compression_type, CompressionType::Xz);
+    }
+
+    #[test]
+    fn archive_selection_accepts_codeberg_attachment_without_mime_type() {
+        let release: Release = serde_json::from_str(include_str!(
+            "../../tests/fixtures/luxtorpeda-codeberg-release.json"
+        ))
+        .unwrap();
+        let plan = look_for_compressed_archive(&release).expect("Expected Codeberg tar.xz archive");
+
+        assert_eq!(
+            plan.url,
+            "https://codeberg.org/luxtorpeda/luxtorpeda/releases/download/v77.1.0/luxtorpeda-v77.1.0.tar.xz"
+        );
+        assert_eq!(plan.compression_type, CompressionType::Xz);
+        assert_eq!(plan.expected_size, 23447584);
     }
 
     fn archive_with_symlink(path: &str, target: &str) -> Vec<u8> {
