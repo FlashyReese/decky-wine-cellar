@@ -774,7 +774,7 @@ fn is_download_progress_update_throttled(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::github_util::Release;
+    use crate::release_util::Release;
     use crate::wine_cask::generate_compatibility_tool_vdf;
     use std::fs;
     use std::path::PathBuf;

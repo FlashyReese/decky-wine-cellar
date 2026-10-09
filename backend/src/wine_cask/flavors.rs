@@ -1,8 +1,10 @@
-use crate::github_util;
-use crate::github_util::Release;
+use crate::release_util::{self, Release, ReleaseSource};
 use crate::wine_cask::app::WineCask;
+use chrono::DateTime;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
+use std::cmp::Reverse;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
@@ -66,8 +68,44 @@ pub struct SteamClientCompatToolInfo {
     pub str_display_name: String,
 }
 
-pub fn catalog_release_id(flavor: &CompatibilityToolFlavor, release_id: u64) -> String {
-    format!("catalog:{}:{}", flavor, release_id)
+pub fn catalog_release_id(
+    flavor: &CompatibilityToolFlavor,
+    release_id: u64,
+    source: ReleaseSource,
+) -> String {
+    match source {
+        // Keep existing GitHub release IDs unchanged.
+        ReleaseSource::GitHub => format!("catalog:{}:{}", flavor, release_id),
+        ReleaseSource::Codeberg => format!("catalog:{}:codeberg:{}", flavor, release_id),
+    }
+}
+
+fn merge_luxtorpeda_releases(codeberg: Vec<Release>, github: Vec<Release>) -> Flavor {
+    let flavor = CompatibilityToolFlavor::Luxtorpeda;
+    let mut seen_tags = HashSet::new();
+    let mut releases = Vec::new();
+
+    // Prefer the current upstream when a version exists on both hosts.
+    for (source, source_releases) in [
+        (ReleaseSource::Codeberg, codeberg),
+        (ReleaseSource::GitHub, github),
+    ] {
+        for release in source_releases {
+            if seen_tags.insert(release.tag_name.clone()) {
+                releases.push(CatalogRelease {
+                    id: catalog_release_id(&flavor, release.id, source),
+                    flavor: flavor.clone(),
+                    release,
+                });
+            }
+        }
+    }
+
+    releases.sort_by_cached_key(|release| {
+        Reverse(DateTime::parse_from_rfc3339(&release.release.published_at).ok())
+    });
+
+    Flavor { flavor, releases }
 }
 
 impl WineCask {
@@ -82,14 +120,7 @@ impl WineCask {
                 renew_cache,
             )
             .await;
-        let luxtorpeda_flavor = self
-            .get_flavor(
-                CompatibilityToolFlavor::Luxtorpeda,
-                "luxtorpeda-dev",
-                "luxtorpeda",
-                renew_cache,
-            )
-            .await;
+        let luxtorpeda_flavor = self.get_luxtorpeda_flavor(renew_cache).await;
         let boxtron_flavor = self
             .get_flavor(
                 CompatibilityToolFlavor::Boxtron,
@@ -116,6 +147,19 @@ impl WineCask {
         flavors
     }
 
+    async fn get_luxtorpeda_flavor(&self, renew_cache: bool) -> Flavor {
+        let (codeberg, github) = tokio::join!(
+            self.get_releases_from_source(
+                ReleaseSource::Codeberg,
+                "luxtorpeda",
+                "luxtorpeda",
+                renew_cache,
+            ),
+            self.get_releases("luxtorpeda-dev", "luxtorpeda", renew_cache),
+        );
+        merge_luxtorpeda_releases(codeberg.unwrap_or_default(), github.unwrap_or_default())
+    }
+
     async fn get_flavor_with_v3_filter(
         &self,
         compatibility_tool_flavor: CompatibilityToolFlavor,
@@ -138,7 +182,11 @@ impl WineCask {
                 releases: filtered
                     .into_iter()
                     .map(|release| CatalogRelease {
-                        id: catalog_release_id(&compatibility_tool_flavor, release.id),
+                        id: catalog_release_id(
+                            &compatibility_tool_flavor,
+                            release.id,
+                            ReleaseSource::GitHub,
+                        ),
                         flavor: compatibility_tool_flavor.clone(),
                         release,
                     })
@@ -178,7 +226,11 @@ impl WineCask {
                 releases: github_releases
                     .into_iter()
                     .map(|release| CatalogRelease {
-                        id: catalog_release_id(&compatibility_tool_flavor, release.id),
+                        id: catalog_release_id(
+                            &compatibility_tool_flavor,
+                            release.id,
+                            ReleaseSource::GitHub,
+                        ),
                         flavor: compatibility_tool_flavor.clone(),
                         release,
                     })
@@ -198,16 +250,32 @@ impl WineCask {
         repository: &str,
         renew_cache: bool,
     ) -> Option<Vec<Release>> {
+        self.get_releases_from_source(ReleaseSource::GitHub, owner, repository, renew_cache)
+            .await
+    }
+
+    async fn get_releases_from_source(
+        &self,
+        source: ReleaseSource,
+        owner: &str,
+        repository: &str,
+        renew_cache: bool,
+    ) -> Option<Vec<Release>> {
         const SECONDS_IN_A_DAY: u64 = 86_400;
 
         let path = env::var("DECKY_PLUGIN_RUNTIME_DIR").unwrap_or_else(|_| "/tmp/".to_string());
 
-        let file_name = format!("github_releases_{}_{}_cache.json", owner, repository);
+        let file_name = format!(
+            "{}_releases_{}_{}_cache.json",
+            source.cache_prefix(),
+            owner,
+            repository
+        );
         let cache_file = PathBuf::from(path).join(&file_name);
 
         if !renew_cache && cache_file.exists() && cache_file.is_file() {
             match read_cached_releases(&cache_file) {
-                Ok((modified, github_releases)) => {
+                Ok((modified, releases)) => {
                     let duration = SystemTime::now()
                         .duration_since(modified)
                         .unwrap_or_default();
@@ -216,12 +284,12 @@ impl WineCask {
                         self.app_state.lock().await.updater_last_check =
                             Some(unix_timestamp(modified));
 
-                        if github_releases.is_empty() {
+                        if releases.is_empty() {
                             info!(
                                 "Cached data is possibly corrupted or missing information from an older version. Renewing cache..."
                             );
                         } else {
-                            return Some(github_releases);
+                            return Some(releases);
                         }
                     } else {
                         info!("Cache file is older than 1 day. Fetching new releases.");
@@ -237,7 +305,7 @@ impl WineCask {
             }
         }
 
-        let github_releases = match github_util::list_all_releases(owner, repository).await {
+        let releases = match release_util::list_all_releases(source, owner, repository).await {
             Ok(releases) => {
                 if releases.is_empty() {
                     error!("No releases found.");
@@ -267,16 +335,16 @@ impl WineCask {
                 releases
             }
             Err(err) => {
-                error!("{}", github_util::format_error_chain(&err));
+                error!("{}", release_util::format_error_chain(&err));
                 error!("full debug error: {err:#?}");
 
                 if cache_file.exists() && cache_file.is_file() {
                     match read_cached_releases(&cache_file) {
-                        Ok((modified, github_releases)) => {
+                        Ok((modified, releases)) => {
                             self.app_state.lock().await.updater_last_check =
                                 Some(unix_timestamp(modified));
                             warn!("Unable to fetch new releases. Using cached releases.");
-                            github_releases
+                            releases
                         }
                         Err(cache_err) => {
                             error!(
@@ -293,7 +361,7 @@ impl WineCask {
             }
         };
 
-        Some(github_releases)
+        Some(releases)
     }
 }
 

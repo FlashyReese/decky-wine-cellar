@@ -1,4 +1,4 @@
-use crate::github_util::{Asset, Release};
+use crate::release_util::{Asset, Release};
 use crate::i18n::{message, LocalizedMessage};
 use crate::wine_cask::app::{OperationState, WineCask};
 use crate::wine_cask::download_progress::DownloadProgressTracker;
