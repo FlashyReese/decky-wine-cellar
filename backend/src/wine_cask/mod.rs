@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::{fs, io};
 
 pub mod app;
+pub mod catalog;
 pub mod download_progress;
 pub mod flavors;
 pub mod install;

@@ -1,10 +1,9 @@
-use crate::release_util::{self, Release, ReleaseSource};
+use crate::release_util::{self, Release, ReleaseProvider, ReleaseSource};
 use crate::wine_cask::app::WineCask;
-use chrono::DateTime;
+use crate::wine_cask::catalog::{FlavorDefinition, FLAVOR_DEFINITIONS};
+use futures_util::future::join_all;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::cmp::Reverse;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
@@ -80,198 +79,37 @@ pub fn catalog_release_id(
     }
 }
 
-fn merge_luxtorpeda_releases(codeberg: Vec<Release>, github: Vec<Release>) -> Flavor {
-    let flavor = CompatibilityToolFlavor::Luxtorpeda;
-    let mut seen_tags = HashSet::new();
-    let mut releases = Vec::new();
-
-    // Prefer the current upstream when a version exists on both hosts.
-    for (source, source_releases) in [
-        (ReleaseSource::Codeberg, codeberg),
-        (ReleaseSource::GitHub, github),
-    ] {
-        for release in source_releases {
-            if seen_tags.insert(release.tag_name.clone()) {
-                releases.push(CatalogRelease {
-                    id: catalog_release_id(&flavor, release.id, source),
-                    flavor: flavor.clone(),
-                    release,
-                });
-            }
-        }
-    }
-
-    releases.sort_by_cached_key(|release| {
-        Reverse(DateTime::parse_from_rfc3339(&release.release.published_at).ok())
-    });
-
-    Flavor { flavor, releases }
-}
-
 impl WineCask {
     pub async fn get_flavors(&self, renew_cache: bool) -> Vec<Flavor> {
-        let mut flavors = Vec::new();
-
-        let proton_ge_flavor = self
-            .get_flavor(
-                CompatibilityToolFlavor::ProtonGE,
-                "GloriousEggroll",
-                "proton-ge-custom",
-                renew_cache,
-            )
-            .await;
-        let luxtorpeda_flavor = self.get_luxtorpeda_flavor(renew_cache).await;
-        let boxtron_flavor = self
-            .get_flavor(
-                CompatibilityToolFlavor::Boxtron,
-                "dreamer",
-                "boxtron",
-                renew_cache,
-            )
-            .await;
-
-        flavors.push(proton_ge_flavor);
-        flavors.push(luxtorpeda_flavor);
-        flavors.push(boxtron_flavor);
-
-        let proton_cachyos_flavor = self
-            .get_flavor_with_v3_filter(
-                CompatibilityToolFlavor::ProtonCachyOS,
-                "CachyOS",
-                "proton-cachyos",
-                renew_cache,
-            )
-            .await;
-        flavors.push(proton_cachyos_flavor);
-
+        let mut flavors = Vec::with_capacity(FLAVOR_DEFINITIONS.len());
+        for definition in FLAVOR_DEFINITIONS {
+            flavors.push(self.get_flavor(definition, renew_cache).await);
+        }
         flavors
     }
 
-    async fn get_luxtorpeda_flavor(&self, renew_cache: bool) -> Flavor {
-        let (codeberg, github) = tokio::join!(
-            self.get_releases_from_source(
-                ReleaseSource::Codeberg,
-                "luxtorpeda",
-                "luxtorpeda",
-                renew_cache,
-            ),
-            self.get_releases("luxtorpeda-dev", "luxtorpeda", renew_cache),
-        );
-        merge_luxtorpeda_releases(codeberg.unwrap_or_default(), github.unwrap_or_default())
+    async fn get_flavor(&self, definition: &FlavorDefinition, renew_cache: bool) -> Flavor {
+        let provider_releases = join_all(definition.providers.iter().map(|provider| async move {
+            let releases = self
+                .get_provider_releases(provider, renew_cache)
+                .await
+                .unwrap_or_default();
+            (provider, releases)
+        }))
+        .await;
+        definition.merge_releases(provider_releases)
     }
 
-    async fn get_flavor_with_v3_filter(
+    async fn get_provider_releases(
         &self,
-        compatibility_tool_flavor: CompatibilityToolFlavor,
-        owner: &str,
-        repository: &str,
-        renew_cache: bool,
-    ) -> Flavor {
-        let releases = self.get_releases(owner, repository, renew_cache).await;
-
-        if let Some(releases) = releases {
-            let filtered = Self::filter_v3_releases(releases);
-            if filtered.is_empty() {
-                return Flavor {
-                    flavor: compatibility_tool_flavor,
-                    releases: Vec::new(),
-                };
-            }
-            Flavor {
-                flavor: compatibility_tool_flavor.clone(),
-                releases: filtered
-                    .into_iter()
-                    .map(|release| CatalogRelease {
-                        id: catalog_release_id(
-                            &compatibility_tool_flavor,
-                            release.id,
-                            ReleaseSource::GitHub,
-                        ),
-                        flavor: compatibility_tool_flavor.clone(),
-                        release,
-                    })
-                    .collect(),
-            }
-        } else {
-            Flavor {
-                flavor: compatibility_tool_flavor,
-                releases: Vec::new(),
-            }
-        }
-    }
-
-    fn filter_v3_releases(releases: Vec<Release>) -> Vec<Release> {
-        let allowed_arches = ["x86_64_v3"];
-        releases
-            .into_iter()
-            .filter(|release| {
-                release
-                    .assets
-                    .iter()
-                    .any(|asset| allowed_arches.iter().any(|arch| asset.name.contains(arch)))
-            })
-            .collect()
-    }
-
-    async fn get_flavor(
-        &self,
-        compatibility_tool_flavor: CompatibilityToolFlavor,
-        owner: &str,
-        repository: &str,
-        renew_cache: bool,
-    ) -> Flavor {
-        if let Some(github_releases) = self.get_releases(owner, repository, renew_cache).await {
-            Flavor {
-                flavor: compatibility_tool_flavor.clone(),
-                releases: github_releases
-                    .into_iter()
-                    .map(|release| CatalogRelease {
-                        id: catalog_release_id(
-                            &compatibility_tool_flavor,
-                            release.id,
-                            ReleaseSource::GitHub,
-                        ),
-                        flavor: compatibility_tool_flavor.clone(),
-                        release,
-                    })
-                    .collect(),
-            }
-        } else {
-            Flavor {
-                flavor: compatibility_tool_flavor,
-                releases: Vec::new(),
-            }
-        }
-    }
-
-    async fn get_releases(
-        &self,
-        owner: &str,
-        repository: &str,
-        renew_cache: bool,
-    ) -> Option<Vec<Release>> {
-        self.get_releases_from_source(ReleaseSource::GitHub, owner, repository, renew_cache)
-            .await
-    }
-
-    async fn get_releases_from_source(
-        &self,
-        source: ReleaseSource,
-        owner: &str,
-        repository: &str,
+        provider: &ReleaseProvider,
         renew_cache: bool,
     ) -> Option<Vec<Release>> {
         const SECONDS_IN_A_DAY: u64 = 86_400;
 
         let path = env::var("DECKY_PLUGIN_RUNTIME_DIR").unwrap_or_else(|_| "/tmp/".to_string());
 
-        let file_name = format!(
-            "{}_releases_{}_{}_cache.json",
-            source.cache_prefix(),
-            owner,
-            repository
-        );
-        let cache_file = PathBuf::from(path).join(&file_name);
+        let cache_file = PathBuf::from(path).join(provider.cache_file_name());
 
         if !renew_cache && cache_file.exists() && cache_file.is_file() {
             match read_cached_releases(&cache_file) {
@@ -305,7 +143,7 @@ impl WineCask {
             }
         }
 
-        let releases = match release_util::list_all_releases(source, owner, repository).await {
+        let releases = match release_util::list_all_releases(provider).await {
             Ok(releases) => {
                 if releases.is_empty() {
                     error!("No releases found.");

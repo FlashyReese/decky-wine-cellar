@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::time::Duration;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ReleaseSource {
     GitHub,
     Codeberg,
@@ -28,6 +28,40 @@ impl ReleaseSource {
                 owner, repository, page
             ),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ReleaseProvider {
+    pub source: ReleaseSource,
+    pub owner: &'static str,
+    pub repository: &'static str,
+}
+
+impl ReleaseProvider {
+    pub const fn github(owner: &'static str, repository: &'static str) -> Self {
+        Self {
+            source: ReleaseSource::GitHub,
+            owner,
+            repository,
+        }
+    }
+
+    pub const fn codeberg(owner: &'static str, repository: &'static str) -> Self {
+        Self {
+            source: ReleaseSource::Codeberg,
+            owner,
+            repository,
+        }
+    }
+
+    pub fn cache_file_name(self) -> String {
+        format!(
+            "{}_releases_{}_{}_cache.json",
+            self.source.cache_prefix(),
+            self.owner,
+            self.repository
+        )
     }
 }
 
@@ -71,9 +105,7 @@ pub struct Response {
 }
 
 pub async fn list_all_releases(
-    source: ReleaseSource,
-    owner: &str,
-    repository: &str,
+    provider: &ReleaseProvider,
 ) -> Result<Vec<Release>, ReleaseUtilError> {
     let client = reqwest::Client::builder()
         .user_agent("FlashyReese/decky-wine-cellar")
@@ -86,7 +118,9 @@ pub async fn list_all_releases(
     let mut page = 1;
 
     loop {
-        let url = source.releases_url(owner, repository, page);
+        let url = provider
+            .source
+            .releases_url(provider.owner, provider.repository, page);
 
         let response = client.get(&url).send().await?;
 
