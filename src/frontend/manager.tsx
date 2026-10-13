@@ -98,7 +98,9 @@ export default function ManagerTab({
       )}
 
       <DialogControlsSection>
-        <DialogControlsSectionHeader>{t("common-installed")}</DialogControlsSectionHeader>
+        <DialogControlsSectionHeader>
+          {t("common-installed")}
+        </DialogControlsSectionHeader>
         {installedTools.length === 0 ? (
           <div>{t("tools-empty")}</div>
         ) : (
@@ -120,9 +122,12 @@ export default function ManagerTab({
                     paddingBottom: "10px",
                   }}
                 >
-                  <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
+                  <span
+                    style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}
+                  >
                     {getInstalledToolLabel(installedTool)}
-                    {installedTool.requires_restart && t("tools-requiresRestart")}
+                    {installedTool.requires_restart &&
+                      t("tools-requiresRestart")}
                     {installedTool.used_by_games.length !== 0 &&
                       t("tools-usedByGames")}
                   </span>
@@ -136,7 +141,9 @@ export default function ManagerTab({
                     }}
                   >
                     <DialogButton
-                      aria-label={t("tools-actionsFor", { tool: getInstalledToolLabel(installedTool) })}
+                      aria-label={t("tools-actionsFor", {
+                        tool: getInstalledToolLabel(installedTool),
+                      })}
                       style={{
                         height: "40px",
                         width: "40px",
@@ -146,7 +153,6 @@ export default function ManagerTab({
                       onClick={(event: MouseEvent) =>
                         showContextMenu(
                           <Menu label={t("tools-installedActions")}>
-
                             <MenuItem
                               disabled={installedToolBusy}
                               onClick={() => {
@@ -171,7 +177,9 @@ export default function ManagerTab({
                               <MenuItem
                                 onClick={() => {
                                   if (installedTool.github_release != null) {
-                                    handleViewChangeLog(installedTool.github_release);
+                                    handleViewChangeLog(
+                                      installedTool.github_release,
+                                    );
                                   }
                                 }}
                               >

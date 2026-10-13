@@ -43,7 +43,10 @@ export default function ManagePage() {
           return;
         }
 
-        if (response.type === MessageType.UpdateState && response.app_state != null) {
+        if (
+          response.type === MessageType.UpdateState &&
+          response.app_state != null
+        ) {
           setAppState(response.app_state);
           log("Received app state update");
         } else if (
@@ -58,7 +61,8 @@ export default function ManagePage() {
             return {
               ...currentState,
               current_operation: response.operation_state?.current_operation,
-              queued_operations: response.operation_state?.queued_operations ?? [],
+              queued_operations:
+                response.operation_state?.queued_operations ?? [],
             };
           });
         }
@@ -110,18 +114,16 @@ export default function ManagePage() {
     appState.catalog_flavors.forEach((flavor) => {
       pages.push({
         title: flavor.flavor,
-        content: <FlavorTab appState={appState} flavor={flavor} socket={socket} />,
+        content: (
+          <FlavorTab appState={appState} flavor={flavor} socket={socket} />
+        ),
         route: "/wine-cellar/" + flavor.flavor,
       });
     });
   } else {
     pages.push({
       title: t("common-preparing"),
-      content: (
-        <div>
-          {t("common-preparingDescription")}
-        </div>
-      ),
+      content: <div>{t("common-preparingDescription")}</div>,
       route: "/wine-cellar/preparing",
     });
   }

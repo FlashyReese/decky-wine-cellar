@@ -7,7 +7,11 @@
     "build": "rollup -c",
     "watch": "rollup -c -w",
     "test": "tsc --noEmit",
-    "check": "pnpm test && pnpm build"
+    "check": "pnpm test && pnpm build",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write src",
+    "format:check": "prettier --check src"
   },
   "repository": {
     "type": "git",
@@ -29,10 +33,17 @@
   "devDependencies": {
     "@decky/rollup": "^1.0.2",
     "@decky/ui": "^4.12.1",
+    "@eslint/js": "^10.0.1",
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
+    "eslint": "^10.12.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
     "rollup": "4.63.5",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.2"
   },
   "dependencies": {
     "@decky/api": "^1.1.3",

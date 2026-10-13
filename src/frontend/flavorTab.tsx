@@ -78,7 +78,9 @@ export default function FlavorTab({
     <DialogBody>
       {installedToolsForFlavor.length !== 0 && (
         <DialogControlsSection>
-          <DialogControlsSectionHeader>{t("common-installed")}</DialogControlsSectionHeader>
+          <DialogControlsSectionHeader>
+            {t("common-installed")}
+          </DialogControlsSectionHeader>
           <ul style={{ listStyleType: "none", margin: 0, padding: 0 }}>
             {installedToolsForFlavor.map((tool) => {
               const toolBusy = operations.some(
@@ -97,7 +99,9 @@ export default function FlavorTab({
                     paddingBottom: "10px",
                   }}
                 >
-                  <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
+                  <span
+                    style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}
+                  >
                     {getToolLabel(tool)}
                     {tool.requires_restart && t("tools-requiresRestart")}
                     {tool.used_by_games.length !== 0 && t("tools-usedByGames")}
@@ -112,7 +116,9 @@ export default function FlavorTab({
                     }}
                   >
                     <DialogButton
-                      aria-label={t("tools-actionsFor", { tool: getToolLabel(tool) })}
+                      aria-label={t("tools-actionsFor", {
+                        tool: getToolLabel(tool),
+                      })}
                       style={{
                         height: "40px",
                         width: "40px",
@@ -145,7 +151,8 @@ export default function FlavorTab({
                                   if (tool.catalog_release_id != null) {
                                     const release = flavor.releases.find(
                                       (catalogRelease) =>
-                                        catalogRelease.id === tool.catalog_release_id,
+                                        catalogRelease.id ===
+                                        tool.catalog_release_id,
                                     );
                                     if (release != null) {
                                       handleViewChangeLog(release);
@@ -182,7 +189,9 @@ export default function FlavorTab({
       )}
 
       <DialogControlsSection>
-        <DialogControlsSectionHeader>{t("common-catalog")}</DialogControlsSectionHeader>
+        <DialogControlsSectionHeader>
+          {t("common-catalog")}
+        </DialogControlsSectionHeader>
         <ul style={{ listStyleType: "none", margin: 0, padding: 0 }}>
           {flavor.releases.map((release) => {
             const isInstalled = appState.installed_tools.some(

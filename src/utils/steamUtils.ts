@@ -1,4 +1,9 @@
-import { locales, LocalizedError, LocalizedMessage, message } from "../i18n/core";
+import {
+  locales,
+  LocalizedError,
+  LocalizedMessage,
+  message,
+} from "../i18n/core";
 import { getLocale } from "../i18n/locale";
 
 /**
@@ -106,9 +111,7 @@ const COMPAT_TOOLS_TIMEOUT_MS = 5_000;
 const MAX_STEAM_APP_ID = 0xffff_ffff;
 
 function isValidSteamAppId(appId: number): boolean {
-  return (
-    Number.isSafeInteger(appId) && appId > 0 && appId <= MAX_STEAM_APP_ID
-  );
+  return Number.isSafeInteger(appId) && appId > 0 && appId <= MAX_STEAM_APP_ID;
 }
 
 function assertValidSteamAppId(appId: number): void {
@@ -149,7 +152,10 @@ function isShortcut(overview: ManagedAppOverview): boolean {
   try {
     return overview.BIsShortcut?.() ?? appTypeFallback;
   } catch (error) {
-    console.error(`Unable to identify Steam shortcut ${overview.appid}:`, error);
+    console.error(
+      `Unable to identify Steam shortcut ${overview.appid}:`,
+      error,
+    );
     return appTypeFallback;
   }
 }
@@ -229,9 +235,7 @@ export async function GetInstallFolders(): Promise<InstallFolder[]> {
  * compatibility settings.
  * @returns Applications plus a warning when Steam's shortcut inventory is not ready.
  */
-export async function GetManagedApplications(): Promise<
-  ManagedApplicationInventory
-> {
+export async function GetManagedApplications(): Promise<ManagedApplicationInventory> {
   const installedApps = new Map<number, InstalledAppMetadata>();
   // This intentionally bypasses the forgiving public GetInstallFolders helper:
   // callers of this page-specific inventory need to surface an RPC failure
@@ -385,7 +389,9 @@ export function SpecifyCompatTool(appId: number, toolName: string): void {
  * Register a function to be executed when a shutdown start is detected.
  * @param action The function to be executed on shutdown start.
  */
-export function RegisterForShutdownStart(action: () => void): any {
+export function RegisterForShutdownStart(
+  action: () => void,
+): ReturnType<typeof SteamClient.User.RegisterForShutdownStart> {
   return SteamClient.User.RegisterForShutdownStart(() => {
     action();
   });

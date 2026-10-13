@@ -14,7 +14,8 @@ export { getLocale, startLocalization } from "./locale";
 export function useTranslation() {
   const locale = useSyncExternalStore(subscribeLocale, getLocale, getLocale);
   const t = useCallback(
-    (key: TranslationKey, params?: MessageParams) => translate(locale, key, params),
+    (key: TranslationKey, params?: MessageParams) =>
+      translate(locale, key, params),
     [locale],
   );
   const translateMessage = useCallback(

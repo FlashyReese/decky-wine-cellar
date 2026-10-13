@@ -1,5 +1,5 @@
 import { Dropdown, Field, Focusable, SingleDropdownOption } from "@decky/ui";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { DisplayMessage, useTranslation } from "../i18n";
 import { CompatToolInfo, ManagedSteamApplication } from "../utils/steamUtils";
 
@@ -53,13 +53,10 @@ function ApplicationIcon({
 }: {
   application: ManagedSteamApplication;
 }) {
-  const [imageFailed, setImageFailed] = useState(false);
+  const [failedIconUrl, setFailedIconUrl] = useState<string>();
 
-  useEffect(() => {
-    setImageFailed(false);
-  }, [application.iconUrl]);
-
-  const showImage = application.iconUrl != null && !imageFailed;
+  const showImage =
+    application.iconUrl != null && application.iconUrl !== failedIconUrl;
   const fallback = application.name.trim().charAt(0).toLocaleUpperCase() || "?";
 
   return (
@@ -86,7 +83,7 @@ function ApplicationIcon({
           alt=""
           loading="lazy"
           decoding="async"
-          onError={() => setImageFailed(true)}
+          onError={() => setFailedIconUrl(application.iconUrl)}
           style={{
             display: "block",
             width: "32px",
@@ -140,7 +137,9 @@ export default function ApplicationRow({
             >
               {application.name}
             </div>
-            <div style={{ fontSize: "12px", lineHeight: "16px", opacity: 0.65 }}>
+            <div
+              style={{ fontSize: "12px", lineHeight: "16px", opacity: 0.65 }}
+            >
               {application.isShortcut
                 ? t("applications-shortcut")
                 : t("applications-steamGame")}
@@ -155,12 +154,12 @@ export default function ApplicationRow({
               )}
               {optionsState?.status === "error" && (
                 <div role="alert" style={{ color: "#ff9f9f" }}>
-                  {t("applications-toolsFailed", { error: optionsState.message })}
+                  {t("applications-toolsFailed", {
+                    error: optionsState.message,
+                  })}
                 </div>
               )}
-              {isSaving && (
-                <div role="status">{t("applications-saving")}</div>
-              )}
+              {isSaving && <div role="status">{t("applications-saving")}</div>}
               {assignmentError != null && (
                 <div role="alert" style={{ color: "#ff9f9f" }}>
                   {translateMessage(assignmentError)}
@@ -216,8 +215,11 @@ export default function ApplicationRow({
             onMenuWillOpen={(showMenu) =>
               onMenuWillOpen(showMenu, () => {
                 const row = rowRef.current;
-                return row != null && row.isConnected &&
-                  row.contains(row.ownerDocument.activeElement);
+                return (
+                  row != null &&
+                  row.isConnected &&
+                  row.contains(row.ownerDocument.activeElement)
+                );
               })
             }
             onChange={onChange}

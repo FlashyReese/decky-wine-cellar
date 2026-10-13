@@ -1,4 +1,4 @@
-export const log = (...args: any[]) => {
+export const log = (...args: unknown[]) => {
   console.log(
     `%c Decky %c Wine Cellar %c`,
     "background: #16a085; color: black;",
@@ -8,7 +8,7 @@ export const log = (...args: any[]) => {
   );
 };
 
-export const debug = (...args: any[]) => {
+export const debug = (...args: unknown[]) => {
   console.debug(
     `%c Decky %c Wine Cellar %c`,
     "background: #16a085; color: black;",
@@ -18,7 +18,7 @@ export const debug = (...args: any[]) => {
   );
 };
 
-export const error = (...args: any[]) => {
+export const error = (...args: unknown[]) => {
   console.error(
     `%c Decky %c Wine Cellar %c`,
     "background: #16a085; color: black;",

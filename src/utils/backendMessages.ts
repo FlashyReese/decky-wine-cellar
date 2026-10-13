@@ -3,7 +3,9 @@ import { error } from "./logger";
 
 const validMessageTypes = new Set<string>(Object.values(MessageType));
 
-export function parseBackendMessage(data: unknown): MessageEnvelope | undefined {
+export function parseBackendMessage(
+  data: unknown,
+): MessageEnvelope | undefined {
   if (typeof data !== "string") {
     error("Received non-string backend message");
     return undefined;

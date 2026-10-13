@@ -72,7 +72,10 @@ export default function ApplicationsTab({
   const loadGeneration = useRef(0);
   const toolCacheGeneration = useRef(0);
 
-  const compatibilityMappings = appState.app_compat_tool_mappings ?? {};
+  const compatibilityMappings = useMemo(
+    () => appState.app_compat_tool_mappings ?? {},
+    [appState.app_compat_tool_mappings],
+  );
   const compatibilityMappingsStale =
     appState.app_compat_tool_mappings_stale ?? true;
   const toolDisplayNames = useMemo(() => {
@@ -149,7 +152,8 @@ export default function ApplicationsTab({
     }
     setPendingAssignments((current) => {
       const remaining = Object.entries(current).filter(
-        ([appId, toolName]) => (compatibilityMappings[appId] ?? "") !== toolName,
+        ([appId, toolName]) =>
+          (compatibilityMappings[appId] ?? "") !== toolName,
       );
       return remaining.length === Object.keys(current).length
         ? current
@@ -173,9 +177,12 @@ export default function ApplicationsTab({
 
   const sourceApplications = useMemo(
     () =>
-      applications.filter((application) =>
-        source === "all" ||
-        (source === "steam" ? !application.isShortcut : application.isShortcut),
+      applications.filter(
+        (application) =>
+          source === "all" ||
+          (source === "steam"
+            ? !application.isShortcut
+            : application.isShortcut),
       ),
     [applications, source],
   );
@@ -214,7 +221,9 @@ export default function ApplicationsTab({
     const list = applicationListRef.current;
     restoreListFocus.current =
       list?.contains(list.ownerDocument.activeElement) ?? false;
-    setPage((current) => Math.max(0, Math.min(pageCount - 1, current + offset)));
+    setPage((current) =>
+      Math.max(0, Math.min(pageCount - 1, current + offset)),
+    );
   };
   const previousPage = () => changePage(-1);
   const nextPage = () => changePage(1);
@@ -320,7 +329,10 @@ export default function ApplicationsTab({
     [pendingAssignments, requestLatestState, toolOptions],
   );
 
-  const selectCompatTool = (appId: number, selectedOption: SingleDropdownOption) => {
+  const selectCompatTool = (
+    appId: number,
+    selectedOption: SingleDropdownOption,
+  ) => {
     const nextToolName = String(selectedOption.data ?? "");
     if (compatibilityMappingsStale || nextToolName === assignmentFor(appId)) {
       return;
@@ -353,16 +365,18 @@ export default function ApplicationsTab({
     pageStart + APPLICATIONS_PER_PAGE,
     filteredApplications.length,
   );
-  const visibleInventoryWarning = source === "steam" ? undefined : inventoryWarning;
+  const visibleInventoryWarning =
+    source === "steam" ? undefined : inventoryWarning;
   const needsRetry =
     loadError != null ||
     compatibilityMappingsStale ||
     visibleInventoryWarning != null;
-  const emptyMessage = source === "steam"
-    ? "applications-emptySteam"
-    : source === "shortcuts"
-      ? "applications-emptyShortcuts"
-      : "applications-empty";
+  const emptyMessage =
+    source === "steam"
+      ? "applications-emptySteam"
+      : source === "shortcuts"
+        ? "applications-emptyShortcuts"
+        : "applications-empty";
 
   const content = (
     <DialogBody>
@@ -380,10 +394,7 @@ export default function ApplicationsTab({
             gap: "10px",
           }}
         >
-          <div
-            ref={searchFieldRef}
-            style={{ flex: 1, minWidth: 0 }}
-          >
+          <div ref={searchFieldRef} style={{ flex: 1, minWidth: 0 }}>
             <TextField
               aria-label={t("applications-searchLabel")}
               {...{ placeholder: t("applications-searchPlaceholder") }}
@@ -437,10 +448,7 @@ export default function ApplicationsTab({
         )}
 
         {loadError != null && (
-          <div
-            role="alert"
-            style={{ color: "#ff9f9f", paddingBottom: "10px" }}
-          >
+          <div role="alert" style={{ color: "#ff9f9f", paddingBottom: "10px" }}>
             {applications.length === 0
               ? t("applications-loadFailed", { error: loadError })
               : t("applications-refreshFailed", { error: loadError })}
@@ -448,7 +456,10 @@ export default function ApplicationsTab({
         )}
 
         {visibleInventoryWarning != null && (
-          <div role="status" style={{ color: "#f5c56b", paddingBottom: "10px" }}>
+          <div
+            role="status"
+            style={{ color: "#f5c56b", paddingBottom: "10px" }}
+          >
             {translateMessage(visibleInventoryWarning)}
           </div>
         )}
@@ -467,7 +478,9 @@ export default function ApplicationsTab({
         {!isLoading &&
           loadError == null &&
           filteredApplications.length === 0 &&
-          !(visibleInventoryWarning != null && sourceApplications.length === 0) && (
+          !(
+            visibleInventoryWarning != null && sourceApplications.length === 0
+          ) && (
             <div role="status">
               {search.trim() === ""
                 ? t(emptyMessage)
@@ -516,7 +529,9 @@ export default function ApplicationsTab({
                     key={application.appId}
                     application={application}
                     assignedToolName={assignedToolName}
-                    assignedToolDisplayName={toolDisplayNameFor(assignedToolName)}
+                    assignedToolDisplayName={toolDisplayNameFor(
+                      assignedToolName,
+                    )}
                     optionsState={toolOptions[application.appId]}
                     isSaving={application.appId in pendingAssignments}
                     assignmentError={assignmentErrors[application.appId]}
@@ -524,7 +539,9 @@ export default function ApplicationsTab({
                     onMenuWillOpen={(showMenu, isFocused) => {
                       void openToolMenu(application.appId, showMenu, isFocused);
                     }}
-                    onChange={(option) => selectCompatTool(application.appId, option)}
+                    onChange={(option) =>
+                      selectCompatTool(application.appId, option)
+                    }
                   />
                 );
               })}

@@ -1,9 +1,4 @@
-import {
-  Command,
-  CommandType,
-  MessageEnvelope,
-  MessageType,
-} from "../types";
+import { Command, CommandType, MessageEnvelope, MessageType } from "../types";
 import { GetGlobalCompatTools } from "./steamUtils";
 import { error } from "./logger";
 
@@ -29,7 +24,9 @@ export function requestState(socket: WebSocket): void {
   });
 }
 
-export async function reportSteamVisibleTools(socket: WebSocket): Promise<void> {
+export async function reportSteamVisibleTools(
+  socket: WebSocket,
+): Promise<void> {
   const tools = await GetGlobalCompatTools();
   sendMessage(socket, {
     type: MessageType.ReportSteamVisibleTools,
@@ -43,7 +40,10 @@ export function refreshCatalog(socket: WebSocket): void {
   });
 }
 
-export function installCatalogRelease(socket: WebSocket, releaseId: string): void {
+export function installCatalogRelease(
+  socket: WebSocket,
+  releaseId: string,
+): void {
   sendCommand(socket, {
     type: CommandType.InstallCatalogRelease,
     release_id: releaseId,

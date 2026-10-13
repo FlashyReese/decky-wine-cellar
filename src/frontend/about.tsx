@@ -26,9 +26,7 @@ export default function About({
     <DialogBody>
       <DialogControlsSection>
         <div>
-          <p>
-            {t("about-description")}
-          </p>
+          <p>{t("about-description")}</p>
         </div>
         <DialogControlsSectionHeader>Wine Cellar</DialogControlsSectionHeader>
         <SystemInformation appState={appState} socket={socket} />
@@ -55,9 +53,10 @@ function SystemInformation({
         <Field
           label={t("about-updates")}
           description={t("about-lastChecked", {
-            time: appState.updater_last_check != null
-              ? formatRelativeTime(locale, appState.updater_last_check * 1000)
-              : t("about-never"),
+            time:
+              appState.updater_last_check != null
+                ? formatRelativeTime(locale, appState.updater_last_check * 1000)
+                : t("about-never"),
           })}
           bottomSeparator={"none"}
         >

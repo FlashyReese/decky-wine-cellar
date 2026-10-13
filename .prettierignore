@@ -1,0 +1,9 @@
+dist/
+out/
+node_modules/
+.pnpm-store/
+py_modules/
+backend/
+cli/
+pnpm-lock.yaml
+package-lock.json

@@ -1,5 +1,5 @@
 import { CompatToolInfo } from "./utils/steamUtils";
-import { LocalizedMessage } from "./i18n/core";
+import { LocalizedMessage } from "./i18n";
 
 export type GitHubRelease = {
   url: string;

@@ -4,15 +4,15 @@ import { debug } from "./logger";
 export class BackendCtx {
   static async bridge(functionName: string, ...args: unknown[]) {
     debug(`Calling backend function: ${functionName}`);
-    let output = await call(functionName, ...args);
+    const output = await call(functionName, ...args);
     return output;
   }
 
-  static async getSetting(key: string, defaults: any) {
+  static async getSetting(key: string, defaults: unknown) {
     return await this.bridge("settings_getSetting", key, defaults);
   }
 
-  static async setSetting(key: string, value: any) {
+  static async setSetting(key: string, value: unknown) {
     return await this.bridge("settings_setSetting", key, value);
   }
 

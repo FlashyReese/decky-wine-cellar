@@ -22,11 +22,13 @@ const Content: FC = () => {
   };
 
   useEffect(() => {
-    const deckyState = (window as Window & {
-      DeckyPluginLoader?: {
-        deckyState?: { closeActivePlugin?: () => void };
-      };
-    }).DeckyPluginLoader?.deckyState;
+    const deckyState = (
+      window as Window & {
+        DeckyPluginLoader?: {
+          deckyState?: { closeActivePlugin?: () => void };
+        };
+      }
+    ).DeckyPluginLoader?.deckyState;
     if (typeof deckyState?.closeActivePlugin !== "function") return;
 
     deckyState.closeActivePlugin();
@@ -37,7 +39,7 @@ const Content: FC = () => {
     <PanelSection title="Wine Cellar">
       <PanelSectionRow>
         <ButtonItem layout="below" onClick={openManage}>
-            {t("common-manage")}
+          {t("common-manage")}
         </ButtonItem>
       </PanelSectionRow>
     </PanelSection>

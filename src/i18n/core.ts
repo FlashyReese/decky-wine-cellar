@@ -9,7 +9,10 @@ export type LocalizedMessage = {
   params?: MessageParams;
 };
 export type DisplayMessage = string | LocalizedMessage;
-export type Translator = (key: TranslationKey, params?: MessageParams) => string;
+export type Translator = (
+  key: TranslationKey,
+  params?: MessageParams,
+) => string;
 
 // Steam API identifiers and language tags.
 // https://partner.steamgames.com/doc/store/localization/languages
@@ -51,10 +54,13 @@ export type Locale = keyof typeof steamLanguages;
 export const DEFAULT_LOCALE: Locale = "english";
 
 export const locales = Object.fromEntries(
-  Object.entries(steamLanguages).map(([locale, tag]) => [locale, {
-    catalog: catalogs[locale],
-    tag,
-  }]),
+  Object.entries(steamLanguages).map(([locale, tag]) => [
+    locale,
+    {
+      catalog: catalogs[locale],
+      tag,
+    },
+  ]),
 ) as Record<Locale, { catalog: string | undefined; tag: string }>;
 
 const bundles = new Map<Locale, FluentBundle>();
@@ -64,7 +70,9 @@ function getBundle(locale: Locale): FluentBundle {
   let bundle = bundles.get(locale);
   if (!bundle) {
     bundle = new FluentBundle(locales[locale].tag, { useIsolating: false });
-    const errors = bundle.addResource(new FluentResource(locales[locale].catalog ?? ""));
+    const errors = bundle.addResource(
+      new FluentResource(locales[locale].catalog ?? ""),
+    );
     if (errors.length) throw errors[0];
     bundles.set(locale, bundle);
   }
@@ -74,9 +82,10 @@ function getBundle(locale: Locale): FluentBundle {
 function getLocalization(locale: Locale): ReactLocalization {
   let localization = localizations.get(locale);
   if (!localization) {
-    const chain = locale === DEFAULT_LOCALE
-      ? [getBundle(DEFAULT_LOCALE)]
-      : [getBundle(locale), getBundle(DEFAULT_LOCALE)];
+    const chain =
+      locale === DEFAULT_LOCALE
+        ? [getBundle(DEFAULT_LOCALE)]
+        : [getBundle(locale), getBundle(DEFAULT_LOCALE)];
     localization = new ReactLocalization(chain, null);
     localizations.set(locale, localization);
   }
@@ -100,7 +109,8 @@ export function normalizeLanguage(language: string): Locale {
   let tag = normalizeTag(language);
   while (tag) {
     const locale = languageAliases.get(tag);
-    if (locale != null) return locales[locale].catalog != null ? locale : DEFAULT_LOCALE;
+    if (locale != null)
+      return locales[locale].catalog != null ? locale : DEFAULT_LOCALE;
     const separator = tag.lastIndexOf("-");
     if (separator < 0) break;
     tag = tag.slice(0, separator);
@@ -114,10 +124,14 @@ export function translate(
   params: MessageParams = {},
 ): string {
   const localization = getLocalization(locale);
-  const args = Object.fromEntries(Object.entries(params).map(([name, value]) => [
-    name,
-    typeof value === "object" ? translate(locale, value.key, value.params) : value,
-  ]));
+  const args = Object.fromEntries(
+    Object.entries(params).map(([name, value]) => [
+      name,
+      typeof value === "object"
+        ? translate(locale, value.key, value.params)
+        : value,
+    ]),
+  );
   return localization.getString(key, args, key);
 }
 
@@ -132,15 +146,22 @@ const relativeTimeUnits: readonly [number, Intl.RelativeTimeFormatUnit][] = [
   [1, "second"],
 ];
 
-export function formatRelativeTime(locale: Locale, timestamp: number, now = Date.now()): string {
+export function formatRelativeTime(
+  locale: Locale,
+  timestamp: number,
+  now = Date.now(),
+): string {
   let formatter = relativeTimeFormatters.get(locale);
   if (!formatter) {
-    formatter = new Intl.RelativeTimeFormat(locales[locale].tag, { numeric: "always" });
+    formatter = new Intl.RelativeTimeFormat(locales[locale].tag, {
+      numeric: "always",
+    });
     relativeTimeFormatters.set(locale, formatter);
   }
   const seconds = (timestamp - now) / 1000;
-  const [divisor, unit] = relativeTimeUnits.find(([size]) => Math.abs(seconds) >= size)
-    ?? relativeTimeUnits[relativeTimeUnits.length - 1];
+  const [divisor, unit] =
+    relativeTimeUnits.find(([size]) => Math.abs(seconds) >= size) ??
+    relativeTimeUnits[relativeTimeUnits.length - 1];
   return formatter.format(Math.round(seconds / divisor), unit);
 }
 
@@ -153,7 +174,10 @@ export function resolveMessage(
     : translate(locale, message.key, message.params);
 }
 
-export function message(key: TranslationKey, params?: MessageParams): LocalizedMessage {
+export function message(
+  key: TranslationKey,
+  params?: MessageParams,
+): LocalizedMessage {
   return { key, params };
 }
 

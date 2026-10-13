@@ -59,10 +59,13 @@ export default function OperationProgress({
           <span>
             {rate != null && rate > 0
               ? t("download-speed", {
-                  speed: (rate / (1024 * 1024)).toLocaleString(locales[locale].tag, {
-                    minimumFractionDigits: rate < 1024 * 1024 ? 2 : 1,
-                    maximumFractionDigits: rate < 1024 * 1024 ? 2 : 1,
-                  }),
+                  speed: (rate / (1024 * 1024)).toLocaleString(
+                    locales[locale].tag,
+                    {
+                      minimumFractionDigits: rate < 1024 * 1024 ? 2 : 1,
+                      maximumFractionDigits: rate < 1024 * 1024 ? 2 : 1,
+                    },
+                  ),
                 })
               : rate === 0
                 ? t("download-waiting")
