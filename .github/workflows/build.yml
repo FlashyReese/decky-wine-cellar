@@ -43,9 +43,19 @@ jobs:
           from pathlib import Path
 
           version = json.loads(Path("package.json").read_text())["version"]
-          backend_version = tomllib.loads(Path("backend/Cargo.toml").read_text())["package"]["version"]
-          if version != backend_version:
-              raise SystemExit(f"Frontend version {version} differs from backend version {backend_version}")
+          backend = tomllib.loads(Path("backend/Cargo.toml").read_text())["package"]
+          npm_lock = json.loads(Path("package-lock.json").read_text())
+          cargo_lock = tomllib.loads(Path("backend/Cargo.lock").read_text())
+          locked_backend = next(package for package in cargo_lock["package"] if package["name"] == backend["name"] and "source" not in package)
+          versions = {
+              "backend/Cargo.toml": backend["version"],
+              "backend/Cargo.lock": locked_backend["version"],
+              "package-lock.json": npm_lock["version"],
+              "package-lock.json (root package)": npm_lock["packages"][""]["version"],
+          }
+          for path, actual in versions.items():
+              if actual != version:
+                  raise SystemExit(f"{path} has version {actual}, expected {version}. Update and commit the manifests and lockfiles together.")
           if os.environ["GITHUB_REF_TYPE"] == "tag" and os.environ["GITHUB_REF_NAME"] != version:
               raise SystemExit(f"Release tag must match package versions: {version}")
           PY
