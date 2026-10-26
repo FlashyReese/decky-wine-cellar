@@ -1,5 +1,5 @@
 import { Command, CommandType, MessageEnvelope, MessageType } from "../types";
-import { GetGlobalCompatTools } from "./steamUtils";
+import { GetGlobalCompatTools, GetSteamShortcuts } from "./steamUtils";
 import { error } from "./logger";
 
 function sendMessage(socket: WebSocket, message: MessageEnvelope): void {
@@ -21,17 +21,23 @@ function sendCommand(socket: WebSocket, command: Command): void {
 export function requestState(socket: WebSocket): void {
   sendMessage(socket, {
     type: MessageType.GetState,
+    steam_shortcuts: GetSteamShortcuts(),
   });
 }
 
 export async function reportSteamVisibleTools(
   socket: WebSocket,
 ): Promise<void> {
-  const tools = await GetGlobalCompatTools();
-  sendMessage(socket, {
-    type: MessageType.ReportSteamVisibleTools,
-    steam_visible_tools: tools,
-  });
+  try {
+    const tools = await GetGlobalCompatTools();
+    sendMessage(socket, {
+      type: MessageType.ReportSteamVisibleTools,
+      steam_visible_tools: tools,
+    });
+  } catch (cause) {
+    // An unavailable Steam API is not evidence that installed tools need a restart.
+    error("Unable to refresh Steam compatibility tools:", cause);
+  }
 }
 
 export function refreshCatalog(socket: WebSocket): void {

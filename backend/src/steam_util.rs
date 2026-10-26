@@ -7,7 +7,7 @@ use std::{env, fmt};
 
 use keyvalues_parser::Vdf;
 use log::{error, info, warn};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub enum SteamUtilError {
@@ -35,7 +35,7 @@ pub struct CompatibilityTool {
     pub to_os_list: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SteamApp {
     pub app_id: u64,
     pub name: String,

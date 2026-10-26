@@ -1,4 +1,4 @@
-import { CompatToolInfo } from "./utils/steamUtils";
+import { CompatToolInfo, SteamShortcut } from "./utils/steamUtils";
 import { LocalizedMessage } from "./i18n";
 
 export type GitHubRelease = {
@@ -143,6 +143,7 @@ export type MessageEnvelope = {
   type: MessageType;
   command?: Command;
   steam_visible_tools?: CompatToolInfo[];
+  steam_shortcuts?: SteamShortcut[];
   notification?: LocalizedMessage;
   app_state?: AppState;
   operation_state?: OperationStateSnapshot;

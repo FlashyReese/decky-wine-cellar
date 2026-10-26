@@ -16,7 +16,7 @@ use log::{error, info, warn, Level};
 use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::fs::OpenOptions;
-use std::io::{Error as IoError, ErrorKind};
+use std::io::{Error as IoError, ErrorKind, Read};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -38,6 +38,7 @@ type ArcWineCask = Arc<WineCask>;
 #[tokio::main]
 async fn main() -> Result<(), IoError> {
     configure_logger()?;
+    watch_parent_pipe()?;
 
     let addr = get_server_address();
 
@@ -55,6 +56,8 @@ async fn main() -> Result<(), IoError> {
         updater_state: UpdaterState::Idle,
         updater_last_check: None,
         steam_visible_tools: Vec::new(),
+        steam_visible_tools_reported: false,
+        steam_shortcuts: HashMap::new(),
         operation_queue: VecDeque::new(),
         app_compat_tool_mappings_last_refresh_attempt: None,
         app_compat_tool_mappings_refresh_in_progress: false,
@@ -63,6 +66,7 @@ async fn main() -> Result<(), IoError> {
     let wine_cask = WineCask {
         steam_util,
         app_state,
+        backend_sync_lock: Mutex::new(()),
         operation_broadcast_cache: Arc::new(Mutex::new(None)),
         queue_notify: queue_notify.clone(),
     };
@@ -78,6 +82,35 @@ async fn main() -> Result<(), IoError> {
     start_server(addr, wine_cask_arc, state).await;
 
     info!("Exiting...");
+    Ok(())
+}
+
+fn watch_parent_pipe() -> Result<(), IoError> {
+    if env::var("WINE_CELLAR_PARENT_PIPE").as_deref() != Ok("1") {
+        return Ok(());
+    }
+
+    // Python owns the write end of stdin. Even SIGKILL closes it, so a loader
+    // restart cannot leave this backend serving an outdated binary on our port.
+    std::thread::Builder::new()
+        .name("parent-pipe".into())
+        .spawn(|| {
+            let mut input = std::io::stdin().lock();
+            let mut byte = [0];
+            loop {
+                match input.read(&mut byte) {
+                    Ok(0) => break,
+                    Err(err) if err.kind() == ErrorKind::Interrupted => continue,
+                    Err(err) => {
+                        warn!("Failed to read supervisor pipe: {}", err);
+                        break;
+                    }
+                    Ok(_) => {}
+                }
+            }
+            info!("Supervisor pipe closed; exiting backend");
+            std::process::exit(0);
+        })?;
     Ok(())
 }
 
@@ -237,7 +270,10 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
 
     match request.r#type {
         MessageType::GetState => {
-            wine_cask.refresh_app_compat_tool_mappings().await;
+            if let Some(shortcuts) = request.steam_shortcuts {
+                wine_cask.update_steam_shortcuts(shortcuts).await;
+            }
+            wine_cask.sync_backend_state().await;
             wine_cask.broadcast_app_state(peer_map).await;
         }
         MessageType::ReportSteamVisibleTools => {

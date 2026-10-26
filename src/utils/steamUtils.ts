@@ -5,6 +5,7 @@ import {
   message,
 } from "../i18n/core";
 import { getLocale } from "../i18n/locale";
+import { getCompatManagerTools } from "./steamCompat";
 
 /**
  * Represents information about a compatibility tool.
@@ -85,6 +86,11 @@ export type ManagedApplicationInventory = {
   warning?: LocalizedMessage;
 };
 
+export type SteamShortcut = {
+  app_id: number;
+  name: string;
+};
+
 type ManagedAppOverview = {
   appid: number;
   app_type: number;
@@ -160,38 +166,54 @@ function isShortcut(overview: ManagedAppOverview): boolean {
   }
 }
 
+/** Undefined means Steam's inventory is unavailable; an empty array means no shortcuts. */
+export function GetSteamShortcuts(): SteamShortcut[] | undefined {
+  const appStore = window.appStore as unknown as ManagedAppStore | undefined;
+  if (appStore == null) return undefined;
+
+  const inventory = getAppOverviews(appStore);
+  if (!inventory.isComplete) return undefined;
+
+  const shortcuts = new Map<number, SteamShortcut>();
+  for (const overview of inventory.overviews) {
+    if (isValidSteamAppId(overview.appid) && isShortcut(overview)) {
+      shortcuts.set(overview.appid, {
+        app_id: overview.appid,
+        name: overview.display_name?.trim() || String(overview.appid),
+      });
+    }
+  }
+  return Array.from(shortcuts.values());
+}
+
 /**
  * Retrieves a list of available compatibility tools for all applications.
  * @returns A Promise that resolves to an array of CompatToolInfo objects.
  */
 export async function GetGlobalCompatTools(): Promise<CompatToolInfo[]> {
-  try {
-    const response = await window.SteamClient.Settings.GetGlobalCompatTools();
-    // Map the response to CompatToolInfo objects and return as an array
-    return response.map((tool: CompatToolInfo) => ({
-      ...tool,
-    })) as CompatToolInfo[];
-  } catch (error) {
-    // If an error occurs during the API call, log the error and return an empty array
-    console.error("Error:", error);
-    return [];
-  }
+  return withCompatToolsTimeout(getCompatManagerTools());
 }
 
 /**
  * Retrieves the compatibility tools Steam allows for a specific application.
- * Unlike the global helper, failures are allowed to propagate so callers can
+ * Query failures are allowed to propagate so callers can
  * distinguish an unavailable menu from an application with no compatible tools.
  */
 export async function GetAvailableCompatTools(
   appId: number,
 ): Promise<CompatToolInfo[]> {
   assertValidSteamAppId(appId);
+  return withCompatToolsTimeout(getCompatManagerTools(appId));
+}
+
+async function withCompatToolsTimeout(
+  request: Promise<CompatToolInfo[]>,
+): Promise<CompatToolInfo[]> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
 
   try {
     const response = await Promise.race([
-      window.SteamClient.Apps.GetAvailableCompatTools(appId),
+      request,
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(
           () => reject(new LocalizedError("errors-compatToolsTimeout")),

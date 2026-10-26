@@ -1,6 +1,7 @@
 import asyncio
 import asyncio.subprocess
 import logging
+import os
 import typing
 
 import decky  # type: ignore
@@ -28,7 +29,12 @@ class Plugin:
     @classmethod
     async def _spawn_backend(cls):
         logger.info("Starting Wine Cask (the Wine Cellar backend)...")
-        cls.BACKEND_PROC = await asyncio.subprocess.create_subprocess_exec(cls.BACKEND_PATH)
+        # The backend exits on EOF if this process dies without running _unload.
+        cls.BACKEND_PROC = await asyncio.subprocess.create_subprocess_exec(
+            cls.BACKEND_PATH,
+            stdin=asyncio.subprocess.PIPE,
+            env={**os.environ, "WINE_CELLAR_PARENT_PIPE": "1"},
+        )
         logger.info(f"Wine Cask started with PID {cls.BACKEND_PROC.pid}")
 
     @classmethod
@@ -72,18 +78,25 @@ class Plugin:
     async def _stop_backend(cls):
         cls.BACKEND_STOPPING = True
 
-        if cls.BACKEND_PROC is None:
+        backend_proc = cls.BACKEND_PROC
+        if backend_proc is None:
             logger.warning("Wine Cask is not running!")
         else:
             logger.info("Terminating Wine Cask (the Wine Cellar backend)...")
-            cls.BACKEND_PROC.terminate()
+            try:
+                backend_proc.terminate()
+            except ProcessLookupError:
+                pass
 
             try:
-                await asyncio.wait_for(cls.BACKEND_PROC.wait(), timeout=5)
+                await asyncio.wait_for(backend_proc.wait(), timeout=5)
             except asyncio.TimeoutError:
                 logger.warning("Wine Cask did not exit after SIGTERM, killing process...")
-                cls.BACKEND_PROC.kill()
-                await cls.BACKEND_PROC.wait()
+                try:
+                    backend_proc.kill()
+                except ProcessLookupError:
+                    pass
+                await backend_proc.wait()
 
             cls.BACKEND_PROC = None
 

@@ -1,5 +1,5 @@
 use crate::i18n::{message, LocalizedMessage};
-use crate::steam_util::SteamUtil;
+use crate::steam_util::{SteamApp, SteamUtil};
 use crate::wine_cask::download_progress::DownloadProgress;
 use crate::wine_cask::flavors::{
     CatalogRelease, CompatibilityToolFlavor, Flavor, InstalledCompatibilityTool,
@@ -20,6 +20,7 @@ const APP_COMPAT_TOOL_MAPPINGS_REFRESH_INTERVAL: Duration = Duration::from_milli
 pub struct WineCask {
     pub steam_util: SteamUtil,
     pub app_state: Arc<Mutex<AppState>>,
+    pub backend_sync_lock: Mutex<()>,
     pub operation_broadcast_cache: Arc<Mutex<Option<(OperationStateSnapshot, Instant)>>>,
     pub queue_notify: Arc<Notify>,
 }
@@ -41,6 +42,10 @@ pub struct AppState {
     pub updater_state: UpdaterState,
     pub updater_last_check: Option<u64>,
     pub steam_visible_tools: Vec<SteamClientCompatToolInfo>,
+    #[serde(skip)]
+    pub steam_visible_tools_reported: bool,
+    #[serde(skip)]
+    pub steam_shortcuts: HashMap<u64, String>,
     #[serde(skip)]
     pub operation_queue: VecDeque<QueuedCommand>,
     #[serde(skip)]
@@ -77,6 +82,7 @@ pub struct MessageEnvelope {
     pub command: Option<Command>,
     pub notification: Option<LocalizedMessage>,
     pub steam_visible_tools: Option<Vec<SteamClientCompatToolInfo>>,
+    pub steam_shortcuts: Option<Vec<SteamApp>>,
     pub app_state: Option<AppState>,
     pub operation_state: Option<OperationStateSnapshot>,
 }
@@ -371,6 +377,7 @@ impl WineCask {
             command: None,
             notification: None,
             steam_visible_tools: None,
+            steam_shortcuts: None,
             app_state: Some(app_state.clone()),
             operation_state: None,
         };
@@ -401,6 +408,7 @@ impl WineCask {
             command: None,
             notification: None,
             steam_visible_tools: None,
+            steam_shortcuts: None,
             app_state: None,
             operation_state: Some(snapshot),
         };
@@ -413,6 +421,7 @@ impl WineCask {
             command: None,
             notification: Some(message),
             steam_visible_tools: None,
+            steam_shortcuts: None,
             app_state: None,
             operation_state: None,
         };
@@ -442,57 +451,14 @@ impl WineCask {
         }
     }
 
-    fn get_used_by_games(&self, display_name: &str, internal_name: &str) -> Vec<String> {
-        let compat_tools_mapping = self
-            .steam_util
-            .get_compatibility_tools_mappings()
-            .unwrap_or_else(|err| {
-                warn!("Failed to get compatibility tools mappings: {}", err);
-                HashMap::new()
-            });
-        let installed_games = self
-            .steam_util
-            .list_installed_games()
-            .unwrap_or_else(|err| {
-                warn!("Failed to get list of installed games: {}", err);
-                Vec::new()
-            });
-
-        installed_games
-            .iter()
-            .filter(|game| {
-                compat_tools_mapping
-                    .get(&game.app_id)
-                    .map(|name| name == display_name || name == internal_name)
-                    .unwrap_or(false)
+    pub async fn update_steam_shortcuts(&self, shortcuts: Vec<SteamApp>) {
+        self.app_state.lock().await.steam_shortcuts = shortcuts
+            .into_iter()
+            .filter(|app| {
+                (1..=u32::MAX as u64).contains(&app.app_id) && !app.name.trim().is_empty()
             })
-            .map(|game| game.name.clone())
-            .collect()
-    }
-
-    pub fn list_compatibility_tools(&self) -> Option<Vec<InstalledCompatibilityTool>> {
-        let compat_tools = self.steam_util.list_compatibility_tools().ok()?;
-
-        let mut installed_tools = Vec::new();
-
-        for compat_tool in &compat_tools {
-            let used_by_games =
-                self.get_used_by_games(&compat_tool.display_name, &compat_tool.internal_name);
-            installed_tools.push(InstalledCompatibilityTool {
-                id: format!("installed:{}", compat_tool.directory_name),
-                path: compat_tool.path.to_string_lossy().to_string(),
-                directory_name: compat_tool.directory_name.clone(),
-                display_name: compat_tool.display_name.clone(),
-                internal_name: compat_tool.internal_name.clone(),
-                used_by_games,
-                flavor: CompatibilityToolFlavor::Unknown,
-                github_release: None,
-                catalog_release_id: None,
-                requires_restart: false,
-            });
-        }
-
-        Some(installed_tools)
+            .map(|app| (app.app_id, app.name))
+            .collect();
     }
 
     pub async fn process_frontend_compat_tools_update(
@@ -500,7 +466,11 @@ impl WineCask {
         peer_map: &PeerMap,
         steam_visible_tools: Vec<SteamClientCompatToolInfo>,
     ) {
-        self.app_state.lock().await.steam_visible_tools = steam_visible_tools;
+        {
+            let mut state = self.app_state.lock().await;
+            state.steam_visible_tools = steam_visible_tools;
+            state.steam_visible_tools_reported = true;
+        }
         self.sync_backend_state().await;
         self.broadcast_app_state(peer_map).await;
     }
@@ -564,33 +534,94 @@ impl WineCask {
     }
 
     pub async fn sync_backend_state(&self) {
+        // State requests, catalog refreshes, and queued operations can overlap.
+        // Publish their disk snapshots in order rather than overwriting newer usage data.
+        let _sync_guard = self.backend_sync_lock.lock().await;
         self.refresh_app_compat_tool_mappings().await;
 
-        let (catalog_flavors, steam_visible_tools) = {
-            let app_state = self.app_state.lock().await;
-            (
-                app_state.catalog_flavors.clone(),
-                app_state.steam_visible_tools.clone(),
-            )
+        let steam_util = self.steam_util.clone();
+        let snapshot = tokio::task::spawn_blocking(move || {
+            let tools = steam_util.list_compatibility_tools().ok()?;
+            let mappings = steam_util
+                .get_compatibility_tools_mappings()
+                .map_err(|err| {
+                    warn!("Failed to get compatibility tools mappings: {}", err);
+                })
+                .ok();
+            let installed_games = steam_util.list_installed_games().unwrap_or_else(|err| {
+                warn!("Failed to get list of installed games: {}", err);
+                Vec::new()
+            });
+            Some((tools, mappings, installed_games))
+        })
+        .await;
+        let (compat_tools, mappings, installed_games) = match snapshot {
+            Ok(Some(snapshot)) => snapshot,
+            Ok(None) => return,
+            Err(err) => {
+                error!("Failed to refresh installed compatibility tools: {}", err);
+                return;
+            }
         };
 
-        let visible_tool_names: HashSet<String> = steam_visible_tools
+        let mut app_state = self.app_state.lock().await;
+        let mut applications: HashMap<u64, String> = installed_games
+            .into_iter()
+            .map(|app| (app.app_id, app.name))
+            .collect();
+        // Steam shortcuts have no .acf manifests. Steam's frontend supplies names
+        // for the same unsigned app IDs used by config.vdf's compatibility mappings.
+        applications.extend(app_state.steam_shortcuts.clone());
+        let visible_tool_names: HashSet<&str> = app_state
+            .steam_visible_tools
             .iter()
-            .map(|tool| tool.str_tool_name.clone())
+            .map(|tool| tool.str_tool_name.as_str())
             .collect();
 
-        let mut installed_tools = self.list_compatibility_tools().unwrap_or_default();
-        for installed_tool in &mut installed_tools {
-            installed_tool.requires_restart =
-                !visible_tool_names.contains(&installed_tool.internal_name);
+        let mut installed_tools = Vec::new();
+        for tool in compat_tools {
+            let mut used_by_games: Vec<String> = if let Some(mappings) = &mappings {
+                applications
+                    .iter()
+                    .filter(|(app_id, _)| {
+                        mappings.get(app_id).is_some_and(|name| {
+                            name == &tool.internal_name || name == &tool.display_name
+                        })
+                    })
+                    .map(|(_, name)| name.clone())
+                    .collect()
+            } else {
+                // Steam may be rewriting config.vdf. A failed read is not evidence
+                // that a tool is unused; retain the last successfully read usage.
+                app_state
+                    .installed_tools
+                    .iter()
+                    .find(|previous| previous.directory_name == tool.directory_name)
+                    .map(|previous| previous.used_by_games.clone())
+                    .unwrap_or_default()
+            };
+            used_by_games.sort();
+            let requires_restart = app_state.steam_visible_tools_reported
+                && !visible_tool_names.contains(tool.internal_name.as_str());
+            let mut installed_tool = InstalledCompatibilityTool {
+                id: format!("installed:{}", tool.directory_name),
+                path: tool.path.to_string_lossy().to_string(),
+                directory_name: tool.directory_name,
+                display_name: tool.display_name,
+                internal_name: tool.internal_name,
+                used_by_games,
+                flavor: CompatibilityToolFlavor::Unknown,
+                github_release: None,
+                catalog_release_id: None,
+                requires_restart,
+            };
             if let Some(catalog_release) =
-                find_catalog_release_for_tool(&catalog_flavors, installed_tool)
+                find_catalog_release_for_tool(&app_state.catalog_flavors, &installed_tool)
             {
-                apply_catalog_release(installed_tool, &catalog_release);
+                apply_catalog_release(&mut installed_tool, &catalog_release);
             }
+            installed_tools.push(installed_tool);
         }
-
-        let mut app_state = self.app_state.lock().await;
         app_state.installed_tools = installed_tools;
     }
 
@@ -816,10 +847,13 @@ mod tests {
                 updater_state: UpdaterState::Idle,
                 updater_last_check: None,
                 steam_visible_tools: Vec::new(),
+                steam_visible_tools_reported: false,
+                steam_shortcuts: HashMap::new(),
                 operation_queue: VecDeque::new(),
                 app_compat_tool_mappings_last_refresh_attempt: None,
                 app_compat_tool_mappings_refresh_in_progress: false,
             })),
+            backend_sync_lock: Mutex::new(()),
             operation_broadcast_cache: Arc::new(Mutex::new(None)),
             queue_notify: Arc::new(Notify::new()),
         }
@@ -848,6 +882,158 @@ mod tests {
             }],
         }];
         app
+    }
+
+    fn write_usage_mappings(steam_path: &std::path::Path, shortcut_tool: &str) {
+        fs::write(
+            steam_path.join("config/config.vdf"),
+            format!(
+                r#""InstallConfigStore" {{ "Software" {{ "Valve" {{ "Steam" {{
+                "CompatToolMapping" {{
+                    "123" {{ "name" "GE-Proton-Test" "priority" "250" }}
+                    "2147483649" {{ "name" "{shortcut_tool}" "priority" "250" }}
+                    "4294967295" {{ "name" "GE Proton Test" "priority" "250" }}
+                }}
+            }} }} }} }}"#
+            ),
+        )
+        .unwrap();
+    }
+
+    fn usage_test_app() -> (tempfile::TempDir, Arc<WineCask>) {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        fs::create_dir(root.join("config")).unwrap();
+        fs::create_dir(root.join("steamapps")).unwrap();
+        fs::write(
+            root.join("steamapps/libraryfolders.vdf"),
+            format!(
+                r#""libraryfolders" {{ "0" {{ "path" "{}" }} }}"#,
+                root.display()
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join("steamapps/appmanifest_123.acf"),
+            r#""AppState" { "appid" "123" "name" "Steam game" }"#,
+        )
+        .unwrap();
+        for (internal_name, display_name) in [
+            ("GE-Proton-Test", "GE Proton Test"),
+            ("GE-Proton-Other", "GE Proton Other"),
+        ] {
+            let tool_path = root.join("compatibilitytools.d").join(internal_name);
+            fs::create_dir_all(&tool_path).unwrap();
+            generate_compatibility_tool_vdf(
+                tool_path.join("compatibilitytool.vdf"),
+                internal_name,
+                display_name,
+            )
+            .unwrap();
+        }
+        write_usage_mappings(root, "GE-Proton-Test");
+        let app = Arc::new(mapping_test_app(root.to_path_buf(), HashMap::new(), false));
+        (directory, app)
+    }
+
+    async fn usage_for(app: &WineCask, tool_name: &str) -> Vec<String> {
+        app.app_state
+            .lock()
+            .await
+            .installed_tools
+            .iter()
+            .find(|tool| tool.internal_name == tool_name)
+            .unwrap()
+            .used_by_games
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn tool_usage_includes_steam_games_and_unsigned_shortcut_ids() {
+        let (_directory, app) = usage_test_app();
+        let peers = PeerMap::new(Mutex::new(HashMap::new()));
+        let request = serde_json::json!({
+            "type": "GetState",
+            "steam_shortcuts": [
+                { "app_id": 2147483649_u64, "name": "old re3 name" },
+                { "app_id": 2147483649_u64, "name": "re3" },
+                { "app_id": 4294967295_u64, "name": "reVC" },
+                { "app_id": 0, "name": "invalid" },
+                { "app_id": 4294967296_u64, "name": "invalid" },
+                { "app_id": 2147483650_u64, "name": "  " }
+            ]
+        });
+        crate::handle_request(&app, &request.to_string(), &peers).await;
+
+        assert_eq!(
+            usage_for(&app, "GE-Proton-Test").await,
+            ["Steam game", "re3", "reVC"]
+        );
+        assert!(usage_for(&app, "GE-Proton-Other").await.is_empty());
+        let state = app.app_state.lock().await;
+        assert_eq!(state.steam_shortcuts.len(), 2);
+        assert!(serde_json::to_value(&*state)
+            .unwrap()
+            .get("steam_shortcuts")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn tool_usage_refreshes_shortcut_assignments_names_and_removals() {
+        let (directory, app) = usage_test_app();
+        let peers = PeerMap::new(Mutex::new(HashMap::new()));
+        crate::handle_request(
+            &app,
+            r#"{
+            "type":"GetState", "steam_shortcuts":[{"app_id":2147483649,"name":"re3"}]
+        }"#,
+            &peers,
+        )
+        .await;
+        assert_eq!(
+            usage_for(&app, "GE-Proton-Test").await,
+            ["Steam game", "re3"]
+        );
+
+        write_usage_mappings(directory.path(), "GE-Proton-Other");
+        // An unavailable frontend inventory omits the field, preserving known shortcuts.
+        crate::handle_request(&app, r#"{"type":"GetState"}"#, &peers).await;
+        assert_eq!(usage_for(&app, "GE-Proton-Test").await, ["Steam game"]);
+        assert_eq!(usage_for(&app, "GE-Proton-Other").await, ["re3"]);
+
+        crate::handle_request(
+            &app,
+            r#"{
+            "type":"GetState", "steam_shortcuts":[{"app_id":2147483649,"name":"renamed re3"}]
+        }"#,
+            &peers,
+        )
+        .await;
+        assert_eq!(usage_for(&app, "GE-Proton-Other").await, ["renamed re3"]);
+
+        crate::handle_request(&app, r#"{"type":"GetState","steam_shortcuts":[]}"#, &peers).await;
+        assert!(usage_for(&app, "GE-Proton-Other").await.is_empty());
+        assert_eq!(usage_for(&app, "GE-Proton-Test").await, ["Steam game"]);
+    }
+
+    #[tokio::test]
+    async fn tool_usage_preserves_last_good_data_when_steam_config_is_unreadable() {
+        let (directory, app) = usage_test_app();
+        let peers = PeerMap::new(Mutex::new(HashMap::new()));
+        crate::handle_request(
+            &app,
+            r#"{
+            "type":"GetState", "steam_shortcuts":[{"app_id":2147483649,"name":"re3"}]
+        }"#,
+            &peers,
+        )
+        .await;
+        fs::write(directory.path().join("config/config.vdf"), "invalid").unwrap();
+        crate::handle_request(&app, r#"{"type":"GetState"}"#, &peers).await;
+        assert_eq!(
+            usage_for(&app, "GE-Proton-Test").await,
+            ["Steam game", "re3"]
+        );
     }
 
     #[tokio::test]
@@ -900,7 +1086,9 @@ mod tests {
         app.sync_backend_state().await;
         let installed = app.app_state.lock().await.installed_tools[0].clone();
         assert_eq!(installed.catalog_release_id.as_deref(), Some("release-1"));
-        assert!(installed.requires_restart);
+        assert!(!installed.requires_restart);
+        app.process_frontend_compat_tools_update(&peers, Vec::new()).await;
+        assert!(app.app_state.lock().await.installed_tools[0].requires_restart);
         app.process_frontend_compat_tools_update(&peers, vec![SteamClientCompatToolInfo {
             str_tool_name: installed.internal_name.clone(),
             str_display_name: installed.display_name.clone(),
@@ -1068,10 +1256,13 @@ mod tests {
                 updater_state: UpdaterState::Idle,
                 updater_last_check: None,
                 steam_visible_tools: Vec::new(),
+                steam_visible_tools_reported: false,
+                steam_shortcuts: HashMap::new(),
                 operation_queue: VecDeque::new(),
                 app_compat_tool_mappings_last_refresh_attempt: None,
                 app_compat_tool_mappings_refresh_in_progress: false,
             })),
+            backend_sync_lock: Mutex::new(()),
             operation_broadcast_cache: Arc::new(Mutex::new(None)),
             queue_notify: Arc::new(Notify::new()),
         };

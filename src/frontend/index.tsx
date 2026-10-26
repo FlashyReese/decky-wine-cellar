@@ -20,6 +20,17 @@ export default function ManagePage() {
     let isDisposed = false;
     let reconnectTimeout: ReturnType<typeof setTimeout> | undefined;
     let activeSocket: WebSocket | undefined;
+    let reportingTools = false;
+
+    const refresh = (websocket: WebSocket) => {
+      requestState(websocket);
+      if (!reportingTools) {
+        reportingTools = true;
+        void reportSteamVisibleTools(websocket).finally(() => {
+          reportingTools = false;
+        });
+      }
+    };
 
     const connect = () => {
       if (isDisposed) {
@@ -30,11 +41,10 @@ export default function ManagePage() {
       const uniqueId = uuidv4();
       activeSocket = websocket;
 
-      websocket.onopen = async () => {
+      websocket.onopen = () => {
         setSocket(websocket);
         log("WebSocket connection established. Unique Identifier:", uniqueId);
-        requestState(websocket);
-        await reportSteamVisibleTools(websocket);
+        refresh(websocket);
       };
 
       websocket.onmessage = (event) => {
@@ -89,8 +99,17 @@ export default function ManagePage() {
 
     connect();
 
+    // Retry startup inventory loading and pick up Steam's delayed config writes,
+    // shortcut edits, and assignments changed outside Wine Cellar.
+    const refreshInterval = setInterval(() => {
+      if (activeSocket?.readyState === WebSocket.OPEN) {
+        refresh(activeSocket);
+      }
+    }, 5_000);
+
     return () => {
       isDisposed = true;
+      clearInterval(refreshInterval);
       if (reconnectTimeout != null) {
         clearTimeout(reconnectTimeout);
       }
