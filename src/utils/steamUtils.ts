@@ -166,7 +166,7 @@ function isShortcut(overview: ManagedAppOverview): boolean {
  */
 export async function GetGlobalCompatTools(): Promise<CompatToolInfo[]> {
   try {
-    const response = await SteamClient.Settings.GetGlobalCompatTools();
+    const response = await window.SteamClient.Settings.GetGlobalCompatTools();
     // Map the response to CompatToolInfo objects and return as an array
     return response.map((tool: CompatToolInfo) => ({
       ...tool,
@@ -191,7 +191,7 @@ export async function GetAvailableCompatTools(
 
   try {
     const response = await Promise.race([
-      SteamClient.Apps.GetAvailableCompatTools(appId),
+      window.SteamClient.Apps.GetAvailableCompatTools(appId),
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(
           () => reject(new LocalizedError("errors-compatToolsTimeout")),
@@ -218,7 +218,7 @@ export async function GetAvailableCompatTools(
 export async function GetInstallFolders(): Promise<InstallFolder[]> {
   try {
     // Call SteamClient's method to get install folders
-    const response = await SteamClient.InstallFolder.GetInstallFolders();
+    const response = await window.SteamClient.InstallFolder.GetInstallFolders();
     // Map the response to InstallFolder objects and return as an array
     return response.map((tool: InstallFolder) => ({
       ...tool,
@@ -240,7 +240,8 @@ export async function GetManagedApplications(): Promise<ManagedApplicationInvent
   // This intentionally bypasses the forgiving public GetInstallFolders helper:
   // callers of this page-specific inventory need to surface an RPC failure
   // instead of presenting it as an empty library.
-  const installFolders = await SteamClient.InstallFolder.GetInstallFolders();
+  const installFolders =
+    await window.SteamClient.InstallFolder.GetInstallFolders();
 
   for (const folder of installFolders) {
     for (const app of folder.vecApps) {
@@ -382,7 +383,7 @@ export function SpecifyCompatToolWithInfo(
  */
 export function SpecifyCompatTool(appId: number, toolName: string): void {
   assertValidSteamAppId(appId);
-  SteamClient.Apps.SpecifyCompatTool(appId, toolName);
+  window.SteamClient.Apps.SpecifyCompatTool(appId, toolName);
 }
 
 /**
@@ -391,8 +392,8 @@ export function SpecifyCompatTool(appId: number, toolName: string): void {
  */
 export function RegisterForShutdownStart(
   action: () => void,
-): ReturnType<typeof SteamClient.User.RegisterForShutdownStart> {
-  return SteamClient.User.RegisterForShutdownStart(() => {
+): ReturnType<typeof window.SteamClient.User.RegisterForShutdownStart> {
+  return window.SteamClient.User.RegisterForShutdownStart(() => {
     action();
   });
 }
@@ -401,5 +402,5 @@ export function RegisterForShutdownStart(
  * Restarts the Steam client.
  */
 export function RestartSteamClient(): void {
-  SteamClient.User.StartRestart(false);
+  window.SteamClient.User.StartRestart(false);
 }

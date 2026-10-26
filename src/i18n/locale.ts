@@ -24,6 +24,8 @@ export async function startLocalization(): Promise<void> {
   const fallback = navigator.language;
   setLanguage(fallback);
   setLanguage(
-    await SteamClient.Settings.GetCurrentLanguage().catch(() => fallback),
+    await window.SteamClient.Settings.GetCurrentLanguage().catch(
+      () => fallback,
+    ),
   );
 }

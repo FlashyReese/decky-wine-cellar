@@ -25,10 +25,8 @@ export const Markdown: FC<MarkdownProps> = (props) => {
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
-            div: (nodeProps) => (
-              <Focusable {...nodeProps.node?.properties}>
-                {nodeProps.children}
-              </Focusable>
+            div: ({ node: _node, children, ...props }) => (
+              <Focusable {...props}>{children}</Focusable>
             ),
             a: (nodeProps) => {
               const href = nodeProps.href;

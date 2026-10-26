@@ -2,7 +2,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import pluginExternal from "vite-plugin-external";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
 
 const manifest = JSON.parse(
   readFileSync(resolve(import.meta.dirname, "plugin.json"), "utf8"),
@@ -37,7 +36,6 @@ const fluentCatalogs: Plugin = {
 export default defineConfig({
   plugins: [
     fluentCatalogs,
-    nodePolyfills(),
     pluginExternal({
       externals: {
         react: "SP_REACT",

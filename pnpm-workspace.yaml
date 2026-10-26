@@ -1,0 +1,13 @@
+supportedArchitectures:
+  os:
+    - current
+  cpu:
+    - current
+  libc:
+    - glibc
+    - musl
+
+peerDependencyRules:
+  ignoreMissing:
+    - react
+    - react-dom
