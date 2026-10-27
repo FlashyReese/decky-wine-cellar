@@ -34,7 +34,7 @@
   },
   "homepage": "https://github.com/FlashyReese/decky-wine-cellar#readme",
   "devDependencies": {
-    "@decky/ui": "^4.16.0",
+    "@decky/ui": "^4.16.4",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.5",
     "@types/react": "19.3.0",
@@ -45,7 +45,7 @@
     "globals": "^17.13.0",
     "prettier": "^3.9.10",
     "typescript": "~6.0.3",
-    "typescript-eslint": "^8.72.0",
+    "typescript-eslint": "^8.72.1",
     "vite": "^8.3.5",
     "vite-plugin-external": "^8.0.3"
   },
