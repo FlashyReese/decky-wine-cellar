@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 pub enum ReleaseFilter {
     All,
     AssetNameContains(&'static str),
+    AssetNameEndsWith(&'static str),
 }
 
 impl ReleaseFilter {
@@ -19,6 +20,10 @@ impl ReleaseFilter {
                 .assets
                 .iter()
                 .any(|asset| asset.name.contains(pattern)),
+            Self::AssetNameEndsWith(suffix) => release
+                .assets
+                .iter()
+                .any(|asset| asset.name.ends_with(suffix)),
         }
     }
 }
@@ -43,6 +48,11 @@ pub const FLAVOR_DEFINITIONS: &[FlavorDefinition] = &[
         flavor: CompatibilityToolFlavor::ProtonCachyOS,
         providers: &[ReleaseProvider::github("CachyOS", "proton-cachyos")],
         release_filter: ReleaseFilter::AssetNameContains("x86_64_v3"),
+    },
+    FlavorDefinition {
+        flavor: CompatibilityToolFlavor::DWProton,
+        providers: &[ReleaseProvider::github("dawn-winery", "dwproton-mirror")],
+        release_filter: ReleaseFilter::AssetNameEndsWith("-x86_64.tar.xz"),
     },
     FlavorDefinition {
         flavor: CompatibilityToolFlavor::Luxtorpeda,
