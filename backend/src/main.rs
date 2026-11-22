@@ -1,7 +1,8 @@
-mod release_util;
 mod i18n;
 mod multilogger;
+mod release_util;
 mod steam_util;
+pub mod vdf_util;
 mod wine_cask;
 
 use crate::i18n::message;
@@ -58,6 +59,10 @@ async fn main() -> Result<(), IoError> {
         steam_visible_tools: Vec::new(),
         steam_visible_tools_reported: false,
         steam_shortcuts: HashMap::new(),
+        steam_shortcuts_stale: true,
+        steam_shortcuts_account_id: None,
+        steam_shortcuts_from_frontend: false,
+        steam_frontend_account_id: None,
         operation_queue: VecDeque::new(),
         app_compat_tool_mappings_last_refresh_attempt: None,
         app_compat_tool_mappings_refresh_in_progress: false,
@@ -270,10 +275,9 @@ async fn handle_request(wine_cask: &Arc<WineCask>, msg: &str, peer_map: &PeerMap
 
     match request.r#type {
         MessageType::GetState => {
-            if let Some(shortcuts) = request.steam_shortcuts {
-                wine_cask.update_steam_shortcuts(shortcuts).await;
-            }
-            wine_cask.sync_backend_state().await;
+            wine_cask
+                .sync_frontend_state(request.steam_account_id, request.steam_shortcuts)
+                .await;
             wine_cask.broadcast_app_state(peer_map).await;
         }
         MessageType::ReportSteamVisibleTools => {

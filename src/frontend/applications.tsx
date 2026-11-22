@@ -31,6 +31,7 @@ import {
   GetAvailableCompatTools,
   GetManagedApplications,
   ManagedSteamApplication,
+  ShortcutFallback,
   SpecifyCompatTool,
 } from "../utils/steamUtils";
 
@@ -71,6 +72,19 @@ export default function ApplicationsTab({
   >({});
   const loadGeneration = useRef(0);
   const toolCacheGeneration = useRef(0);
+  const shortcutFallback = useRef<ShortcutFallback>({
+    accountId: appState.steam_shortcuts_account_id,
+    shortcuts: appState.steam_shortcuts ?? {},
+    stale: appState.steam_shortcuts_stale ?? true,
+  });
+  // A stable signature avoids reloading the list for identical polling snapshots.
+  const shortcutInventoryKey = JSON.stringify([
+    Object.entries(appState.steam_shortcuts ?? {}).sort(([left], [right]) =>
+      left.localeCompare(right),
+    ),
+    appState.steam_shortcuts_stale ?? true,
+    appState.steam_shortcuts_account_id ?? null,
+  ]);
 
   const compatibilityMappings = useMemo(
     () => appState.app_compat_tool_mappings ?? {},
@@ -97,7 +111,9 @@ export default function ApplicationsTab({
     setLoadError(undefined);
 
     try {
-      const nextInventory = await GetManagedApplications();
+      const nextInventory = await GetManagedApplications(
+        shortcutFallback.current,
+      );
 
       if (generation !== loadGeneration.current) {
         return;
@@ -115,6 +131,20 @@ export default function ApplicationsTab({
       }
     }
   }, []);
+
+  useEffect(() => {
+    const [entries, stale, accountId] = JSON.parse(shortcutInventoryKey) as [
+      [string, string][],
+      boolean,
+      number | null,
+    ];
+    shortcutFallback.current = {
+      accountId,
+      shortcuts: Object.fromEntries(entries),
+      stale,
+    };
+    void loadApplications();
+  }, [shortcutInventoryKey, loadApplications]);
 
   const resetToolOptions = useCallback(() => {
     toolCacheGeneration.current += 1;

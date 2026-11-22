@@ -44,14 +44,34 @@ pub struct AppState {
     pub steam_visible_tools: Vec<SteamClientCompatToolInfo>,
     #[serde(skip)]
     pub steam_visible_tools_reported: bool,
-    #[serde(skip)]
     pub steam_shortcuts: HashMap<u64, String>,
+    pub steam_shortcuts_stale: bool,
+    pub steam_shortcuts_account_id: Option<u32>,
+    #[serde(skip)]
+    pub steam_shortcuts_from_frontend: bool,
+    #[serde(skip)]
+    pub steam_frontend_account_id: Option<u32>,
     #[serde(skip)]
     pub operation_queue: VecDeque<QueuedCommand>,
     #[serde(skip)]
     pub app_compat_tool_mappings_last_refresh_attempt: Option<Instant>,
     #[serde(skip)]
     pub app_compat_tool_mappings_refresh_in_progress: bool,
+}
+
+impl AppState {
+    fn scope_steam_shortcuts(&mut self, account_id: Option<u32>) {
+        if account_id.is_some() && self.steam_shortcuts_account_id == account_id {
+            return;
+        }
+        // Tool usage may retain names when the compatibility mappings cannot be read.
+        for tool in &mut self.installed_tools {
+            tool.used_by_games.clone_from(&tool.used_by_steam_games);
+        }
+        self.steam_shortcuts.clear();
+        self.steam_shortcuts_stale = true;
+        self.steam_shortcuts_account_id = account_id;
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -82,6 +102,8 @@ pub struct MessageEnvelope {
     pub command: Option<Command>,
     pub notification: Option<LocalizedMessage>,
     pub steam_visible_tools: Option<Vec<SteamClientCompatToolInfo>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steam_account_id: Option<u32>,
     pub steam_shortcuts: Option<Vec<SteamApp>>,
     pub app_state: Option<AppState>,
     pub operation_state: Option<OperationStateSnapshot>,
@@ -377,6 +399,7 @@ impl WineCask {
             command: None,
             notification: None,
             steam_visible_tools: None,
+            steam_account_id: None,
             steam_shortcuts: None,
             app_state: Some(app_state.clone()),
             operation_state: None,
@@ -408,6 +431,7 @@ impl WineCask {
             command: None,
             notification: None,
             steam_visible_tools: None,
+            steam_account_id: None,
             steam_shortcuts: None,
             app_state: None,
             operation_state: Some(snapshot),
@@ -421,6 +445,7 @@ impl WineCask {
             command: None,
             notification: Some(message),
             steam_visible_tools: None,
+            steam_account_id: None,
             steam_shortcuts: None,
             app_state: None,
             operation_state: None,
@@ -451,14 +476,75 @@ impl WineCask {
         }
     }
 
-    pub async fn update_steam_shortcuts(&self, shortcuts: Vec<SteamApp>) {
-        self.app_state.lock().await.steam_shortcuts = shortcuts
+    pub async fn sync_frontend_state(
+        &self,
+        account_id: Option<u32>,
+        shortcuts: Option<Vec<SteamApp>>,
+    ) {
+        let _sync_guard = self.backend_sync_lock.lock().await;
+        self.update_steam_shortcuts(account_id.filter(|id| *id != 0), shortcuts)
+            .await;
+        self.sync_backend_state_locked().await;
+    }
+
+    async fn update_steam_shortcuts(
+        &self,
+        account_id: Option<u32>,
+        shortcuts: Option<Vec<SteamApp>>,
+    ) {
+        let mut state = self.app_state.lock().await;
+        state.steam_frontend_account_id = account_id;
+        state.steam_shortcuts_from_frontend = shortcuts.is_some();
+        let Some(shortcuts) = shortcuts else {
+            return;
+        };
+        state.scope_steam_shortcuts(account_id);
+        state.steam_shortcuts_stale = false;
+        state.steam_shortcuts = shortcuts
             .into_iter()
             .filter(|app| {
                 (1..=u32::MAX as u64).contains(&app.app_id) && !app.name.trim().is_empty()
             })
             .map(|app| (app.app_id, app.name))
             .collect();
+    }
+
+    async fn refresh_shortcut_fallback(&self) {
+        let frontend_account_id = {
+            let state = self.app_state.lock().await;
+            if state.steam_shortcuts_from_frontend {
+                return;
+            }
+            state.steam_frontend_account_id
+        };
+        let steam_util = self.steam_util.clone();
+        let result =
+            tokio::task::spawn_blocking(move || steam_util.list_shortcuts(frontend_account_id))
+                .await;
+        let mut state = self.app_state.lock().await;
+        match result {
+            Ok((account_id, shortcuts)) => {
+                state.scope_steam_shortcuts(account_id);
+                match shortcuts {
+                    Ok(shortcuts) => {
+                        state.steam_shortcuts = shortcuts
+                            .into_iter()
+                            .map(|app| (app.app_id, app.name))
+                            .collect();
+                        state.steam_shortcuts_stale = false;
+                    }
+                    Err(err) => {
+                        state.steam_shortcuts_stale = true;
+                        warn!("Failed to read Steam shortcut fallback: {}", err);
+                    }
+                }
+            }
+            Err(err) => {
+                state.scope_steam_shortcuts(frontend_account_id);
+                state.steam_shortcuts_stale = true;
+                error!("Steam shortcut fallback task failed: {}", err);
+            }
+        }
     }
 
     pub async fn process_frontend_compat_tools_update(
@@ -537,6 +623,11 @@ impl WineCask {
         // State requests, catalog refreshes, and queued operations can overlap.
         // Publish their disk snapshots in order rather than overwriting newer usage data.
         let _sync_guard = self.backend_sync_lock.lock().await;
+        self.sync_backend_state_locked().await;
+    }
+
+    async fn sync_backend_state_locked(&self) {
+        self.refresh_shortcut_fallback().await;
         self.refresh_app_compat_tool_mappings().await;
 
         let steam_util = self.steam_util.clone();
@@ -565,13 +656,18 @@ impl WineCask {
         };
 
         let mut app_state = self.app_state.lock().await;
-        let mut applications: HashMap<u64, String> = installed_games
+        let mut applications: HashMap<u64, (String, bool)> = installed_games
             .into_iter()
-            .map(|app| (app.app_id, app.name))
+            .map(|app| (app.app_id, (app.name, false)))
             .collect();
-        // Steam shortcuts have no .acf manifests. Steam's frontend supplies names
-        // for the same unsigned app IDs used by config.vdf's compatibility mappings.
-        applications.extend(app_state.steam_shortcuts.clone());
+        // Shortcut names come from the frontend, or binary VDF when it is unavailable.
+        // Both sources use the unsigned app IDs in config.vdf's compatibility mappings.
+        applications.extend(
+            app_state
+                .steam_shortcuts
+                .iter()
+                .map(|(&app_id, name)| (app_id, (name.clone(), true))),
+        );
         let visible_tool_names: HashSet<&str> = app_state
             .steam_visible_tools
             .iter()
@@ -580,16 +676,20 @@ impl WineCask {
 
         let mut installed_tools = Vec::new();
         for tool in compat_tools {
-            let mut used_by_games: Vec<String> = if let Some(mappings) = &mappings {
-                applications
-                    .iter()
-                    .filter(|(app_id, _)| {
-                        mappings.get(app_id).is_some_and(|name| {
-                            name == &tool.internal_name || name == &tool.display_name
-                        })
-                    })
-                    .map(|(_, name)| name.clone())
-                    .collect()
+            let (mut used_by_games, mut used_by_steam_games) = if let Some(mappings) = &mappings {
+                let mut games = Vec::new();
+                let mut steam_games = Vec::new();
+                for (app_id, (name, is_shortcut)) in &applications {
+                    if mappings.get(app_id).is_some_and(|mapped_tool| {
+                        mapped_tool == &tool.internal_name || mapped_tool == &tool.display_name
+                    }) {
+                        games.push(name.clone());
+                        if !is_shortcut {
+                            steam_games.push(name.clone());
+                        }
+                    }
+                }
+                (games, steam_games)
             } else {
                 // Steam may be rewriting config.vdf. A failed read is not evidence
                 // that a tool is unused; retain the last successfully read usage.
@@ -597,10 +697,16 @@ impl WineCask {
                     .installed_tools
                     .iter()
                     .find(|previous| previous.directory_name == tool.directory_name)
-                    .map(|previous| previous.used_by_games.clone())
+                    .map(|previous| {
+                        (
+                            previous.used_by_games.clone(),
+                            previous.used_by_steam_games.clone(),
+                        )
+                    })
                     .unwrap_or_default()
             };
             used_by_games.sort();
+            used_by_steam_games.sort();
             let requires_restart = app_state.steam_visible_tools_reported
                 && !visible_tool_names.contains(tool.internal_name.as_str());
             let mut installed_tool = InstalledCompatibilityTool {
@@ -610,6 +716,7 @@ impl WineCask {
                 display_name: tool.display_name,
                 internal_name: tool.internal_name,
                 used_by_games,
+                used_by_steam_games,
                 flavor: CompatibilityToolFlavor::Unknown,
                 github_release: None,
                 catalog_release_id: None,
@@ -849,6 +956,10 @@ mod tests {
                 steam_visible_tools: Vec::new(),
                 steam_visible_tools_reported: false,
                 steam_shortcuts: HashMap::new(),
+                steam_shortcuts_stale: true,
+                steam_shortcuts_account_id: None,
+                steam_shortcuts_from_frontend: false,
+                steam_frontend_account_id: None,
                 operation_queue: VecDeque::new(),
                 app_compat_tool_mappings_last_refresh_attempt: None,
                 app_compat_tool_mappings_refresh_in_progress: false,
@@ -932,8 +1043,18 @@ mod tests {
             .unwrap();
         }
         write_usage_mappings(root, "GE-Proton-Test");
+        write_most_recent_account(root, 1);
         let app = Arc::new(mapping_test_app(root.to_path_buf(), HashMap::new(), false));
         (directory, app)
+    }
+
+    fn write_most_recent_account(steam_path: &std::path::Path, account_id: u32) {
+        let steam_id = 76_561_197_960_265_728 + u64::from(account_id);
+        fs::write(
+            steam_path.join("config/loginusers.vdf"),
+            format!(r#""users" {{ "{steam_id}" {{ "MostRecent" "1" }} }}"#),
+        )
+        .unwrap();
     }
 
     async fn usage_for(app: &WineCask, tool_name: &str) -> Vec<String> {
@@ -954,6 +1075,7 @@ mod tests {
         let peers = PeerMap::new(Mutex::new(HashMap::new()));
         let request = serde_json::json!({
             "type": "GetState",
+            "steam_account_id": 1,
             "steam_shortcuts": [
                 { "app_id": 2147483649_u64, "name": "old re3 name" },
                 { "app_id": 2147483649_u64, "name": "re3" },
@@ -972,10 +1094,11 @@ mod tests {
         assert!(usage_for(&app, "GE-Proton-Other").await.is_empty());
         let state = app.app_state.lock().await;
         assert_eq!(state.steam_shortcuts.len(), 2);
-        assert!(serde_json::to_value(&*state)
-            .unwrap()
-            .get("steam_shortcuts")
-            .is_none());
+        let serialized = serde_json::to_value(&*state).unwrap();
+        assert_eq!(serialized["steam_shortcuts"]["2147483649"], "re3");
+        assert_eq!(serialized["steam_shortcuts_stale"], false);
+        assert_eq!(serialized["steam_shortcuts_account_id"], 1);
+        assert!(serialized.get("steam_shortcuts_from_frontend").is_none());
     }
 
     #[tokio::test]
@@ -985,7 +1108,7 @@ mod tests {
         crate::handle_request(
             &app,
             r#"{
-            "type":"GetState", "steam_shortcuts":[{"app_id":2147483649,"name":"re3"}]
+            "type":"GetState", "steam_account_id":1, "steam_shortcuts":[{"app_id":2147483649,"name":"re3"}]
         }"#,
             &peers,
         )
@@ -996,7 +1119,7 @@ mod tests {
         );
 
         write_usage_mappings(directory.path(), "GE-Proton-Other");
-        // An unavailable frontend inventory omits the field, preserving known shortcuts.
+        // The disk account is unchanged, so a read failure preserves known shortcuts.
         crate::handle_request(&app, r#"{"type":"GetState"}"#, &peers).await;
         assert_eq!(usage_for(&app, "GE-Proton-Test").await, ["Steam game"]);
         assert_eq!(usage_for(&app, "GE-Proton-Other").await, ["re3"]);
@@ -1004,14 +1127,19 @@ mod tests {
         crate::handle_request(
             &app,
             r#"{
-            "type":"GetState", "steam_shortcuts":[{"app_id":2147483649,"name":"renamed re3"}]
+            "type":"GetState", "steam_account_id":1, "steam_shortcuts":[{"app_id":2147483649,"name":"renamed re3"}]
         }"#,
             &peers,
         )
         .await;
         assert_eq!(usage_for(&app, "GE-Proton-Other").await, ["renamed re3"]);
 
-        crate::handle_request(&app, r#"{"type":"GetState","steam_shortcuts":[]}"#, &peers).await;
+        crate::handle_request(
+            &app,
+            r#"{"type":"GetState","steam_account_id":1,"steam_shortcuts":[]}"#,
+            &peers,
+        )
+        .await;
         assert!(usage_for(&app, "GE-Proton-Other").await.is_empty());
         assert_eq!(usage_for(&app, "GE-Proton-Test").await, ["Steam game"]);
     }
@@ -1023,7 +1151,7 @@ mod tests {
         crate::handle_request(
             &app,
             r#"{
-            "type":"GetState", "steam_shortcuts":[{"app_id":2147483649,"name":"re3"}]
+            "type":"GetState", "steam_account_id":1, "steam_shortcuts":[{"app_id":2147483649,"name":"re3"}]
         }"#,
             &peers,
         )
@@ -1034,6 +1162,75 @@ mod tests {
             usage_for(&app, "GE-Proton-Test").await,
             ["Steam game", "re3"]
         );
+    }
+
+    #[tokio::test]
+    async fn disk_shortcuts_survive_read_errors_only_for_the_same_account() {
+        let (directory, app) = usage_test_app();
+        let root = directory.path();
+        let peers = PeerMap::new(Mutex::new(HashMap::new()));
+        let config = root.join("userdata/1/config");
+        fs::create_dir_all(&config).unwrap();
+        let shortcuts = config.join("shortcuts.vdf");
+        fs::write(
+            &shortcuts,
+            b"\x00shortcuts\x00\x000\x00\x02appid\x00\x01\x00\x00\x80\x01appname\x00Disk shortcut\x00\x08\x08\x08",
+        )
+        .unwrap();
+        app.sync_backend_state().await;
+        assert_eq!(
+            usage_for(&app, "GE-Proton-Test").await,
+            ["Disk shortcut", "Steam game"]
+        );
+
+        fs::write(&shortcuts, "truncated").unwrap();
+        crate::handle_request(&app, r#"{"type":"GetState"}"#, &peers).await;
+        {
+            let state = app.app_state.lock().await;
+            assert_eq!(state.steam_shortcuts_account_id, Some(1));
+            assert_eq!(
+                state.steam_shortcuts.get(&2147483649).unwrap(),
+                "Disk shortcut"
+            );
+            assert!(state.steam_shortcuts_stale);
+        }
+
+        fs::write(root.join("config/config.vdf"), "invalid").unwrap();
+        crate::handle_request(
+            &app,
+            r#"{"type":"GetState","steam_account_id":1,"steam_shortcuts":[{"app_id":2147483649,"name":"Renamed shortcut"}]}"#,
+            &peers,
+        )
+        .await;
+        assert_eq!(
+            usage_for(&app, "GE-Proton-Test").await,
+            ["Disk shortcut", "Steam game"]
+        );
+
+        write_most_recent_account(root, 2);
+        crate::handle_request(&app, r#"{"type":"GetState"}"#, &peers).await;
+        assert_eq!(usage_for(&app, "GE-Proton-Test").await, ["Steam game"]);
+        let state = app.app_state.lock().await;
+        assert_eq!(state.steam_shortcuts_account_id, Some(2));
+        assert!(state.steam_shortcuts.is_empty());
+        assert!(state.steam_shortcuts_stale);
+    }
+
+    #[tokio::test]
+    async fn frontend_account_scopes_disk_fallback_before_loginusers_updates() {
+        let (_directory, app) = usage_test_app();
+        let peers = PeerMap::new(Mutex::new(HashMap::new()));
+        crate::handle_request(
+            &app,
+            r#"{"type":"GetState","steam_account_id":1,"steam_shortcuts":[{"app_id":2147483649,"name":"Previous shortcut"}]}"#,
+            &peers,
+        )
+        .await;
+        crate::handle_request(&app, r#"{"type":"GetState","steam_account_id":2}"#, &peers).await;
+        let state = app.app_state.lock().await;
+        assert_eq!(state.steam_shortcuts_account_id, Some(2));
+        assert!(state.steam_shortcuts.is_empty());
+        assert!(state.steam_shortcuts_stale);
     }
 
     #[tokio::test]
@@ -1258,6 +1455,10 @@ mod tests {
                 steam_visible_tools: Vec::new(),
                 steam_visible_tools_reported: false,
                 steam_shortcuts: HashMap::new(),
+                steam_shortcuts_stale: true,
+                steam_shortcuts_account_id: None,
+                steam_shortcuts_from_frontend: false,
+                steam_frontend_account_id: None,
                 operation_queue: VecDeque::new(),
                 app_compat_tool_mappings_last_refresh_attempt: None,
                 app_compat_tool_mappings_refresh_in_progress: false,

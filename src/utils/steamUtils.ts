@@ -100,6 +100,7 @@ type ManagedAppOverview = {
 };
 
 type ManagedAppStore = {
+  m_bIsInitialized?: boolean;
   allApps?: readonly ManagedAppOverview[] | Iterable<ManagedAppOverview>;
   GetAppOverviewByAppID?: (
     appId: number,
@@ -110,6 +111,12 @@ type ManagedAppStore = {
 type InstalledAppMetadata = {
   name: string;
   sortAs: string;
+};
+
+export type ShortcutFallback = {
+  accountId?: number | null;
+  shortcuts: Record<string, string>;
+  stale: boolean;
 };
 
 const SHORTCUT_APP_TYPE = 1_073_741_824;
@@ -131,12 +138,60 @@ function getAppOverviews(appStore: ManagedAppStore): {
   isComplete: boolean;
 } {
   try {
-    return appStore.allApps == null
-      ? { overviews: [], isComplete: false }
-      : { overviews: Array.from(appStore.allApps), isComplete: true };
+    const initialized = appStore.m_bIsInitialized;
+    if (initialized === false) {
+      return { overviews: [], isComplete: false };
+    }
+    const apps = appStore.allApps;
+    if (apps == null || typeof apps[Symbol.iterator] !== "function") {
+      return { overviews: [], isComplete: false };
+    }
+    const overviews = Array.from(apps);
+    if (
+      overviews.some(
+        (overview) =>
+          overview == null ||
+          !isValidSteamAppId(overview.appid) ||
+          !Number.isInteger(overview.app_type) ||
+          (overview.display_name != null &&
+            typeof overview.display_name !== "string"),
+      )
+    ) {
+      return { overviews: [], isComplete: false };
+    }
+    return {
+      overviews,
+      isComplete: initialized === true || overviews.length > 0,
+    };
   } catch (error) {
     console.error("Unable to read Steam application inventory:", error);
     return { overviews: [], isComplete: false };
+  }
+}
+
+function getAppStore(): ManagedAppStore | undefined {
+  try {
+    return window.appStore as unknown as ManagedAppStore | undefined;
+  } catch (error) {
+    console.error("Unable to access Steam application inventory:", error);
+    return undefined;
+  }
+}
+
+/** Steam's userdata directories use the low 32 bits of the signed-in user's Steam ID. */
+export function GetSteamAccountId(): number | undefined {
+  try {
+    const steamId = window.App?.GetCurrentUser?.()?.strSteamID;
+    if (steamId == null || !/^\d{1,20}$/.test(steamId)) {
+      return undefined;
+    }
+    const id = BigInt(steamId);
+    if (id > 0xffff_ffff_ffff_ffffn) {
+      return undefined;
+    }
+    return Number(id & 0xffff_ffffn) || undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -168,7 +223,7 @@ function isShortcut(overview: ManagedAppOverview): boolean {
 
 /** Undefined means Steam's inventory is unavailable; an empty array means no shortcuts. */
 export function GetSteamShortcuts(): SteamShortcut[] | undefined {
-  const appStore = window.appStore as unknown as ManagedAppStore | undefined;
+  const appStore = getAppStore();
   if (appStore == null) return undefined;
 
   const inventory = getAppOverviews(appStore);
@@ -257,7 +312,9 @@ export async function GetInstallFolders(): Promise<InstallFolder[]> {
  * compatibility settings.
  * @returns Applications plus a warning when Steam's shortcut inventory is not ready.
  */
-export async function GetManagedApplications(): Promise<ManagedApplicationInventory> {
+export async function GetManagedApplications(
+  shortcutFallback?: ShortcutFallback,
+): Promise<ManagedApplicationInventory> {
   const installedApps = new Map<number, InstalledAppMetadata>();
   // This intentionally bypasses the forgiving public GetInstallFolders helper:
   // callers of this page-specific inventory need to surface an RPC failure
@@ -278,7 +335,7 @@ export async function GetManagedApplications(): Promise<ManagedApplicationInvent
     }
   }
 
-  const appStore = window.appStore as unknown as ManagedAppStore | undefined;
+  const appStore = getAppStore();
   let isPartialInventory = appStore == null;
 
   const overviewsById = new Map<number, ManagedAppOverview>();
@@ -306,7 +363,11 @@ export async function GetManagedApplications(): Promise<ManagedApplicationInvent
 
   const applications = new Map<
     number,
-    { overview?: ManagedAppOverview; isShortcut: boolean }
+    {
+      overview?: ManagedAppOverview;
+      isShortcut: boolean;
+      fallbackName?: string;
+    }
   >();
   for (const overview of overviewsById.values()) {
     const shortcut = isShortcut(overview);
@@ -330,11 +391,29 @@ export async function GetManagedApplications(): Promise<ManagedApplicationInvent
     }
   }
 
+  const accountId = GetSteamAccountId();
+  if (
+    isPartialInventory &&
+    shortcutFallback != null &&
+    (accountId == null || shortcutFallback.accountId === accountId)
+  ) {
+    for (const [rawId, name] of Object.entries(shortcutFallback.shortcuts)) {
+      const appId = Number(rawId);
+      if (isValidSteamAppId(appId) && name.trim() && !applications.has(appId)) {
+        applications.set(appId, { isShortcut: true, fallbackName: name });
+      }
+    }
+    isPartialInventory = shortcutFallback.stale;
+  }
+
   const managedApplications = Array.from(applications.entries()).map(
-    ([appId, { overview, isShortcut: shortcut }]) => {
+    ([appId, { overview, isShortcut: shortcut, fallbackName }]) => {
       const installedMetadata = installedApps.get(appId);
       const name =
-        overview?.display_name || installedMetadata?.name || String(appId);
+        overview?.display_name ||
+        fallbackName ||
+        installedMetadata?.name ||
+        String(appId);
       const sortAs = overview?.sort_as || installedMetadata?.sortAs || name;
 
       let iconUrl: string | undefined;

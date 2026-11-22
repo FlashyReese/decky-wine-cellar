@@ -6,6 +6,7 @@ import { AppState, MessageType } from "../types";
 import { log } from "../utils/logger";
 import { reportSteamVisibleTools, requestState } from "../utils/backendApi";
 import { parseBackendMessage } from "../utils/backendMessages";
+import { GetSteamAccountId } from "../utils/steamUtils";
 import About from "./about";
 import ApplicationsTab from "./applications";
 import FlavorTab from "./flavorTab";
@@ -126,7 +127,13 @@ export default function ManagePage() {
     });
     pages.push({
       title: t("common-applications"),
-      content: <ApplicationsTab appState={appState} socket={socket} />,
+      content: (
+        <ApplicationsTab
+          key={`${GetSteamAccountId() ?? 0}/${appState.steam_shortcuts_account_id ?? 0}`}
+          appState={appState}
+          socket={socket}
+        />
+      ),
       route: "/wine-cellar/applications",
     });
 

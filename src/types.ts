@@ -95,6 +95,9 @@ export type AppState = {
   app_compat_tool_mappings: Record<string, string>;
   app_compat_tool_mappings_stale: boolean;
   steam_visible_tools: CompatToolInfo[];
+  steam_shortcuts?: Record<string, string>;
+  steam_shortcuts_stale?: boolean;
+  steam_shortcuts_account_id?: number | null;
   current_operation?: OperationInfo;
   queued_operations: OperationInfo[];
   updater_state: UpdaterState;
@@ -143,6 +146,7 @@ export type MessageEnvelope = {
   type: MessageType;
   command?: Command;
   steam_visible_tools?: CompatToolInfo[];
+  steam_account_id?: number;
   steam_shortcuts?: SteamShortcut[];
   notification?: LocalizedMessage;
   app_state?: AppState;

@@ -1,7 +1,9 @@
+use crate::vdf_util::{self, Value};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs;
+use std::io::{ErrorKind, Read};
 use std::path::PathBuf;
 use std::{env, fmt};
 
@@ -448,6 +450,134 @@ impl SteamUtil {
         }
 
         Ok(library_folders)
+    }
+
+    /// Return the selected account even if reading its shortcuts fails.
+    pub fn list_shortcuts(
+        &self,
+        frontend_account_id: Option<u32>,
+    ) -> (Option<u32>, Result<Vec<SteamApp>, SteamUtilError>) {
+        let account_id = match frontend_account_id {
+            Some(account_id) => account_id,
+            None => match self.select_shortcut_account() {
+                Ok(Some(account_id)) => account_id,
+                Ok(None) => return (None, Ok(Vec::new())),
+                Err(err) => return (None, Err(SteamUtilError::VdfParsingError(err.to_string()))),
+            },
+        };
+        let shortcuts = self
+            .read_shortcuts(account_id)
+            .map_err(|err| SteamUtilError::VdfParsingError(err.to_string()));
+        (Some(account_id), shortcuts)
+    }
+
+    fn select_shortcut_account(&self) -> Result<Option<u32>, Box<dyn Error>> {
+        let userdata = self.steam_path.join("userdata");
+        let account = match fs::read_to_string(self.steam_path.join("config/loginusers.vdf")) {
+            Ok(text) => {
+                let users = keyvalues_parser::parse(&text)?;
+                let users = users
+                    .value
+                    .get_obj()
+                    .ok_or("Invalid Steam login users object")?;
+                let mut recent_accounts = Vec::new();
+                for (steam_id, entries) in users.iter() {
+                    let recent = entries
+                        .first()
+                        .and_then(|entry| entry.get_obj())
+                        .and_then(|user| user.get("MostRecent"))
+                        .and_then(|values| values.first())
+                        .and_then(|value| value.get_str());
+                    if recent == Some("1") {
+                        let account_id = steam_id.parse::<u64>()? as u32;
+                        if account_id == 0 {
+                            return Err("Invalid Steam account ID".into());
+                        }
+                        recent_accounts.push(account_id);
+                    }
+                }
+                match recent_accounts.len() {
+                    0 => None,
+                    1 => recent_accounts.pop(),
+                    _ => return Err("Multiple Steam accounts marked most recent".into()),
+                }
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => None,
+            Err(err) => return Err(err.into()),
+        };
+        if account.is_some() {
+            return Ok(account);
+        }
+
+        let mut account = None;
+        for entry in fs::read_dir(userdata)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let Some(id) = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<u32>().ok())
+                .filter(|id| *id != 0)
+            else {
+                continue;
+            };
+            if account.replace(id).is_some() {
+                return Err("Cannot select a Steam shortcut account unambiguously".into());
+            }
+        }
+        Ok(account)
+    }
+
+    fn read_shortcuts(&self, account_id: u32) -> Result<Vec<SteamApp>, Box<dyn Error>> {
+        let account = self
+            .steam_path
+            .join("userdata")
+            .join(account_id.to_string());
+        // A missing profile/config directory can be a transient storage failure.
+        // Only an absent shortcuts file in an accessible profile means no shortcuts.
+        fs::read_dir(account.join("config"))?;
+        let file = match fs::File::open(account.join("config/shortcuts.vdf")) {
+            Ok(file) => file,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) => return Err(err.into()),
+        };
+        let mut data = Vec::new();
+        file.take((vdf_util::MAX_FILE_BYTES + 1) as u64)
+            .read_to_end(&mut data)?;
+        let root = vdf_util::parse_binary(&data)?;
+        let Some(Value::Object(shortcuts)) = root.get_unique(b"shortcuts") else {
+            return Err("Missing or invalid shortcuts object".into());
+        };
+
+        let mut apps = Vec::new();
+        for entry in &shortcuts.entries {
+            let app = (|| {
+                let Value::Object(properties) = &entry.value else {
+                    return None;
+                };
+                let Value::Int32(app_id) = properties.get_unique(b"appid")? else {
+                    return None;
+                };
+                // Steam shortcut IDs use the unsigned bit pattern of their INT32 field.
+                let app_id = *app_id as u32 as u64;
+                let Value::String(bytes) = properties.get_unique(b"AppName")? else {
+                    return None;
+                };
+                let name = std::str::from_utf8(bytes).ok()?;
+                (app_id != 0 && !name.trim().is_empty()).then(|| SteamApp {
+                    app_id,
+                    name: name.to_owned(),
+                })
+            })();
+            if let Some(app) = app {
+                apps.push(app);
+            } else {
+                warn!("Skipping Steam shortcut with missing, ambiguous or invalid app ID/name");
+            }
+        }
+        Ok(apps)
     }
 
     pub fn list_installed_games(&self) -> Result<Vec<SteamApp>, SteamUtilError> {

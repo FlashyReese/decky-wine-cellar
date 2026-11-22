@@ -52,6 +52,8 @@ pub struct InstalledCompatibilityTool {
     pub display_name: String,
     pub internal_name: String,
     pub used_by_games: Vec<String>,
+    #[serde(skip)]
+    pub used_by_steam_games: Vec<String>,
     pub requires_restart: bool,
     pub flavor: CompatibilityToolFlavor,
     pub catalog_release_id: Option<String>,

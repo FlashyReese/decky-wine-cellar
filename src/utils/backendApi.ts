@@ -1,5 +1,9 @@
 import { Command, CommandType, MessageEnvelope, MessageType } from "../types";
-import { GetGlobalCompatTools, GetSteamShortcuts } from "./steamUtils";
+import {
+  GetGlobalCompatTools,
+  GetSteamAccountId,
+  GetSteamShortcuts,
+} from "./steamUtils";
 import { error } from "./logger";
 
 function sendMessage(socket: WebSocket, message: MessageEnvelope): void {
@@ -21,6 +25,7 @@ function sendCommand(socket: WebSocket, command: Command): void {
 export function requestState(socket: WebSocket): void {
   sendMessage(socket, {
     type: MessageType.GetState,
+    steam_account_id: GetSteamAccountId(),
     steam_shortcuts: GetSteamShortcuts(),
   });
 }
