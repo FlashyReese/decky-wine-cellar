@@ -356,9 +356,9 @@ impl WineCask {
             self.steam_util.get_steam_compatibility_tools_directory();
 
         let new_path = match catalog_release.flavor {
-            CompatibilityToolFlavor::ProtonGE | CompatibilityToolFlavor::ProtonCachyOS => {
-                extracted_directory.to_path_buf()
-            }
+            CompatibilityToolFlavor::ProtonGE
+            | CompatibilityToolFlavor::ProtonCachyOS
+            | CompatibilityToolFlavor::DWProton => extracted_directory.to_path_buf(),
             CompatibilityToolFlavor::SteamTinkerLaunch
             | CompatibilityToolFlavor::Luxtorpeda
             | CompatibilityToolFlavor::Boxtron => {

@@ -806,6 +806,22 @@ fn find_catalog_release_for_tool(
                 }) {
                     return Some(catalog_release.clone());
                 }
+            } else if flavor.flavor == CompatibilityToolFlavor::DWProton {
+                let tag = catalog_release.release.tag_name.as_str();
+                if [
+                    &installed_tool.internal_name,
+                    &installed_tool.display_name,
+                    &installed_tool.directory_name,
+                ]
+                .iter()
+                .any(|name| {
+                    name.eq_ignore_ascii_case(tag)
+                        || name
+                            .strip_suffix("-x86_64")
+                            .is_some_and(|name| name.eq_ignore_ascii_case(tag))
+                }) {
+                    return Some(catalog_release.clone());
+                }
             } else if installed_tool.display_name
                 == format!("{} {}", flavor.flavor, catalog_release.release.tag_name)
                 || installed_tool.internal_name

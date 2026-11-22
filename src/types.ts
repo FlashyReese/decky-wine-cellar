@@ -157,6 +157,7 @@ export enum CompatibilityToolFlavor {
   Unknown = "Unknown",
   ProtonGE = "ProtonGE",
   ProtonCachyOS = "ProtonCachyOS",
+  DWProton = "DWProton",
   SteamTinkerLaunch = "SteamTinkerLaunch",
   Luxtorpeda = "Luxtorpeda",
   Boxtron = "Boxtron",
