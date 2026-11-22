@@ -62,7 +62,6 @@ export default defineConfig({
     sourcemap: true,
     rolldownOptions: {
       context: "window",
-      external: ["react", "react-dom", "@decky/ui"],
       output: {
         format: "esm",
         sourcemapPathTransform: (relativeSourcePath) =>
